@@ -10,7 +10,8 @@
 #define BUFFER_SIZE 1024
 #define QUEUE_SIZE 10
 
-int sockfd;
+int server_fd;
+int client_fd;
 
 void clean_exit(int signum){
 	
@@ -22,7 +23,8 @@ void clean_exit(int signum){
 	
 	*/
 
-	close(sockfd);
+	close(server_fd);
+	close(client_fd);
 	exit(1);
 
 }
@@ -32,6 +34,17 @@ int main(int argc, const char** argv){
 
 	// exit signal handler
 	signal(SIGINT,clean_exit);
+
+
+
+	// buffer for receiving messages from client
+	char client_buffer[BUFFER_SIZE];
+
+	// buffer for sending messages
+	char server_buffer[BUFFER_SIZE];
+
+
+
 
 	// set port number
 	uint16_t PORT_NUMBER = 12345;
@@ -45,43 +58,62 @@ int main(int argc, const char** argv){
 	addr.sin_port = htons(PORT_NUMBER);
 
 	// create socket file descriptor
-	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+	if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
 		fprintf(stderr, "Failed to create listen socket\n");
 		exit(1);
 	}
 
 	// bind server address and port to socket
-	if (bind(sockfd, (struct sockaddr *)&addr, addrlen) == -1) {
+	if (bind(server_fd, (struct sockaddr *)&addr, addrlen) == -1) {
 		fprintf(stderr, "Failed to bind socket\n");
-		close(sockfd);
+		close(server_fd);
 		exit(1);
 	}
 
 
 	// set to listen for clients
-	if (listen(sockfd, QUEUE_SIZE) == -1) {
+	if (listen(server_fd, QUEUE_SIZE) == -1) {
 		fprintf(stderr, "Failed to listen on socket\n");
-		close(sockfd);
+		close(server_fd);
 		exit(1);
 	}	
 
-	int num_clients = 0; // number of clients
 
-	// main loop
-	while(1){
-		int client_fd = accept(sockfd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
-		if (client_fd == -1){
-			perror("accept");
-			continue;
-		}
-		
-		num_clients++;
+	
 
-		char welcome_message[BUFFER_SIZE];
-		sprintf(welcome_message, "Welcome! Your client ID is %d\n", num_clients);
+	printf("Waiting for a client to connect...\n");
 
-		send(client_fd, welcome_message, strlen(welcome_message), 0);
-
+	client_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
+	if (client_fd == -1){
+		perror("accept");
 	}
+
+	printf("Connection made! Client ID: %d\n", client_fd);
+
+	// send client welcome message	
+	sprintf(server_buffer, "Welcome! Your client ID is %d", client_fd);
+	send(client_fd, server_buffer, strlen(server_buffer), 0);
+	
+
+	while (1){
+
+		// clear buffers
+		memset(server_buffer, 0, sizeof(server_buffer));
+		memset(client_buffer, 0, sizeof(client_buffer));
+		
+		recv(client_fd, client_buffer, BUFFER_SIZE, 0); // receive client message
+
+		printf("[CLIENT %d]: %s\n", client_fd, client_buffer); // display messaeck
+		
+		// feedback message for client
+		sprintf(server_buffer, "[SERVER] Your message was: %s", client_buffer);
+		send(client_fd, server_buffer, strlen(server_buffer), 0); // send feedback
+	}
+
+	close(server_fd);
+	close(client_fd);
+
+
+
 }
 

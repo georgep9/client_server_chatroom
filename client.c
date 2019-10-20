@@ -10,14 +10,14 @@
 
 #define BUFFER_SIZE 1024
 
-int sockfd;
+int server_fd;
 
 // safely exit client process
 void clean_exit(int sig){
 	
 	// TODO
 
-	close(sockfd);
+	close(server_fd);
 	exit(1);
 }
 
@@ -25,7 +25,11 @@ int main(int argc, char **argv){
 
 	signal(SIGINT, clean_exit);
 
-	char buffer[BUFFER_SIZE];
+	// buffer for receiving messages from server
+	char server_buffer[BUFFER_SIZE];
+
+	// buffer for sending messages
+	char client_buffer[BUFFER_SIZE];
 	
 	// expect 2 input arguments
 	if (argc < 3) {
@@ -37,7 +41,7 @@ int main(int argc, char **argv){
 	int PORT = atoi(argv[2]);
 	
 	// create client socket
-	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+	if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
 		fprintf(stderr, "Failed to create socket\n");
 		exit(1);	
 	}
@@ -49,18 +53,40 @@ int main(int argc, char **argv){
 	server_addr.sin_port = htons(PORT);
 
 	// connect to server socket
-	if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+	if (connect(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
 		fprintf(stderr, "Failed to connect.\n");
-		close(sockfd);
+		close(server_fd);
 		exit(1);
 	}
 
 	// read and print welcome message from server
-	read(sockfd, buffer, BUFFER_SIZE);
-	printf("%s", buffer);
+	read(server_fd, server_buffer, BUFFER_SIZE);
+	printf("%s\n", server_buffer);
 
 	while (1){
-		// TODO
+
+		// clear buffers
+		memset(server_buffer, 0, sizeof(server_buffer));
+		memset(client_buffer, 0, sizeof(client_buffer));
+	
+		printf("Input: ");
+		
+		// message from user input
+		char* check = fgets(client_buffer, BUFFER_SIZE, stdin); 
+		if (check == NULL || strlen(check) == 1){
+			continue; // error or only newline
+		 }
+
+		// remove newline char
+		client_buffer[strlen(client_buffer) - 1] = 0;	
+
+		send(server_fd, client_buffer, strlen(client_buffer), 0); // send to server
+
+		recv(server_fd, server_buffer, BUFFER_SIZE, 0); // feedback from server
+		
+		printf("%s\n", server_buffer); // display feedback from server
 	}
+
+	close(server_fd);
 
 }
