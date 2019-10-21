@@ -37,13 +37,6 @@ int main(int argc, const char** argv){
 
 
 
-	// buffer for receiving messages from client
-	char client_buffer[BUFFER_SIZE];
-
-	// buffer for sending messages
-	char server_buffer[BUFFER_SIZE];
-
-
 
 
 	// set port number
@@ -90,23 +83,44 @@ int main(int argc, const char** argv){
 
 	printf("Connection made! Client ID: %d\n", client_fd);
 
-	// send client welcome message	
-	sprintf(server_buffer, "Welcome! Your client ID is %d", client_fd);
-	send(client_fd, server_buffer, strlen(server_buffer), 0);
-	
+	// send client welcome message
+	char welcome_message[BUFFER_SIZE];	
+	sprintf(welcome_message, "Welcome! Your client ID is %d", client_fd);
+	send(client_fd, welcome_message, strlen(welcome_message), 0);
+
 
 	while (1){
+		// buffer for receiving messages from client
+		char client_buffer[BUFFER_SIZE*2];
 
+		// buffer for sending messages
+		char server_buffer[BUFFER_SIZE*2];
+	
 		// clear buffers
-		memset(server_buffer, 0, sizeof(server_buffer));
-		memset(client_buffer, 0, sizeof(client_buffer));
+		bzero(server_buffer, BUFFER_SIZE*2);
+		bzero(client_buffer, BUFFER_SIZE*2);
 		
-		recv(client_fd, client_buffer, BUFFER_SIZE, 0); // receive client message
+		
+		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
 
+		// store client command from buffer
+		char* buffer_cpy = strdup(client_buffer);
+		char* client_command = strtok(buffer_cpy, " ");
+		int cmd_len = strlen(client_command) + 1; // command string length, including space
+
+		// store client arguments (following command) from buffer
+		char client_args[BUFFER_SIZE*2];
+		bzero(client_args, BUFFER_SIZE*2);
+		for(int i = cmd_len; i < strlen(client_buffer); i++){
+			client_args[i - cmd_len] = client_buffer[i];
+		}
+	
 		printf("[CLIENT %d]: %s\n", client_fd, client_buffer); // display messaeck
-		
-		// feedback message for client
-		sprintf(server_buffer, "[SERVER] Your message was: %s", client_buffer);
+
+		// feedback message for client	
+		sprintf(server_buffer, "\n[SERVER]\nCommand: %s\nArguments: %s\n", client_command, client_args);	
+
+		// send feedback
 		send(client_fd, server_buffer, strlen(server_buffer), 0); // send feedback
 	}
 

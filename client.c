@@ -25,12 +25,6 @@ int main(int argc, char **argv){
 
 	signal(SIGINT, clean_exit);
 
-	// buffer for receiving messages from server
-	char server_buffer[BUFFER_SIZE];
-
-	// buffer for sending messages
-	char client_buffer[BUFFER_SIZE];
-	
 	// expect 2 input arguments
 	if (argc < 3) {
 		printf("Please provide hostname and port.\n");	
@@ -60,29 +54,35 @@ int main(int argc, char **argv){
 	}
 
 	// read and print welcome message from server
-	read(server_fd, server_buffer, BUFFER_SIZE);
-	printf("%s\n", server_buffer);
+	char welcome_message[BUFFER_SIZE];
+	read(server_fd, welcome_message, BUFFER_SIZE);
+	printf("%s\n", welcome_message);
 
 	while (1){
 
+		// buffer for receiving messages from server
+		char server_buffer[BUFFER_SIZE*2];
+
+		// buffer for sending messages
+		char client_buffer[BUFFER_SIZE*2];
+	
 		// clear buffers
-		memset(server_buffer, 0, sizeof(server_buffer));
-		memset(client_buffer, 0, sizeof(client_buffer));
+		bzero(server_buffer, BUFFER_SIZE*2);
+		bzero(client_buffer, BUFFER_SIZE*2);
 	
 		printf("Input: ");
 		
 		// message from user input
-		char* check = fgets(client_buffer, BUFFER_SIZE, stdin); 
+		char* check = fgets(client_buffer, BUFFER_SIZE*2, stdin); 
 		if (check == NULL || strlen(check) == 1){
 			continue; // error or only newline
 		 }
-
+		
 		// remove newline char
 		client_buffer[strlen(client_buffer) - 1] = 0;	
-
 		send(server_fd, client_buffer, strlen(client_buffer), 0); // send to server
 
-		recv(server_fd, server_buffer, BUFFER_SIZE, 0); // feedback from server
+		recv(server_fd, server_buffer, BUFFER_SIZE*2, 0); // feedback from server
 		
 		printf("%s\n", server_buffer); // display feedback from server
 	}
