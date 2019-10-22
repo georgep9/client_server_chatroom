@@ -6,28 +6,43 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/in.h>
+#include <stdbool.h>
 
 #define BUFFER_SIZE 1024
 #define QUEUE_SIZE 10
+#define MAX_CHANNELS 255
 
 int server_fd;
 int client_fd;
 
-void clean_exit(int signum){
+// buffer for receiving messages from client
+char client_buffer[BUFFER_SIZE*2];
 	
-	/* TODO
+// buffer for sending messages
+char server_buffer[BUFFER_SIZE*2];
 
-	deal  elegantly  with  any  threads  that  have  been  created  
-	as  well  as  any  open  sockets,  shared  memory  regions,  
-	dynamically allocated memory and/or open files
-	
-	*/
+// struct for channels
+typedef struct channel_data_t{
+	bool is_subscribed;
+	int total_messages;
+	int unread_messages;
+	int read_messages;
+	char next_string;
+} channel_data;
 
-	close(server_fd);
-	close(client_fd);
-	exit(1);
+// initiate channels
+channel_data channel[MAX_CHANNELS];
 
-}
+void clean_exit(int sig);	
+
+void process_buffer(char* buffer);
+void channels();
+void sub(char* id);
+void unsub(char* id);
+void next(char* id);
+void livefeed(char* id);
+void send_message(char* id, char* message);
+void bye();
 
 int main(int argc, const char** argv){
 
@@ -81,7 +96,7 @@ int main(int argc, const char** argv){
 		perror("accept");
 	}
 
-	printf("Connection made! Client ID: %d\n", client_fd);
+	printf("Connection made! Client ID: %d\n\n", client_fd);
 
 	// send client welcome message
 	char welcome_message[BUFFER_SIZE];	
@@ -90,35 +105,16 @@ int main(int argc, const char** argv){
 
 
 	while (1){
-		// buffer for receiving messages from client
-		char client_buffer[BUFFER_SIZE*2];
 
-		// buffer for sending messages
-		char server_buffer[BUFFER_SIZE*2];
-	
 		// clear buffers
 		bzero(server_buffer, BUFFER_SIZE*2);
 		bzero(client_buffer, BUFFER_SIZE*2);
 		
 		
 		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
-
-		// store client command from buffer
-		char* buffer_cpy = strdup(client_buffer);
-		char* client_command = strtok(buffer_cpy, " ");
-		int cmd_len = strlen(client_command) + 1; // command string length, including space
-
-		// store client arguments (following command) from buffer
-		char client_args[BUFFER_SIZE*2];
-		bzero(client_args, BUFFER_SIZE*2);
-		for(int i = cmd_len; i < strlen(client_buffer); i++){
-			client_args[i - cmd_len] = client_buffer[i];
-		}
-	
-		printf("[CLIENT %d]: %s\n", client_fd, client_buffer); // display messaeck
-
-		// feedback message for client	
-		sprintf(server_buffer, "\n[SERVER]\nCommand: %s\nArguments: %s\n", client_command, client_args);	
+		
+		printf("\n[CLIENT %d] -------------\n", client_fd);
+		process_buffer(client_buffer);
 
 		// send feedback
 		send(client_fd, server_buffer, strlen(server_buffer), 0); // send feedback
@@ -130,4 +126,90 @@ int main(int argc, const char** argv){
 
 
 }
+
+
+void clean_exit(int signum){
+	
+	/* TODO
+
+	deal  elegantly  with  any  threads  that  have  been  created  
+	as  well  as  any  open  sockets,  shared  memory  regions,  
+	dynamically allocated memory and/or open files
+	
+	*/
+
+	close(server_fd);
+	close(client_fd);
+	exit(1);
+
+}
+
+void process_buffer(char* buffer){
+	
+	// get command string from buffer
+	char* buffer_cpy = strdup(buffer);
+	char* command = strtok(buffer_cpy, " ");
+
+	// get folllowing id, NULL if not
+	char* id = strtok(NULL, " "); // id following command
+
+	char message[BUFFER_SIZE]; // for message string
+	bzero(message, BUFFER_SIZE);
+
+	// attempt to store mesasge string if id is provided	
+	if (id != NULL){		
+		// starting position for message
+		int start = strlen(command) + 1 + strlen(id) + 1; 
+		// iterate and store characters from buffer, following start position 
+		for (int i = start; i < strlen(buffer); i++){
+			message[i - start] = buffer[i]; 
+		}	
+	}		
+	
+	// display and send feedback
+	char feedback[BUFFER_SIZE*2];
+	sprintf(feedback, "\nCommand: %s\nChannel ID: %s\nMessage: %s\n\n", command, id, message);
+	printf("%s", feedback);
+
+	
+	if (strcmp(command, "CHANNELS") == 0){ channels(); }
+	else if (strcmp(command, "SUB") == 0){ sub(id); }
+	else if (strcmp(command, "UNSUB") == 0){ unsub(id); }
+	else {
+		printf("Invalid command or TODO\n");
+	}
+
+	
+}
+
+void channels(){
+	
+
+	printf("ABout to send subscription data\n");
+
+	for (int i = 0; i<MAX_CHANNELS;i++){
+		if (channel[i].is_subscribed == true){
+			memset(server_buffer, 0, sizeof(server_buffer));
+			sprintf(server_buffer,"Channel: %d \tTotal messages sent : %d \tTotal messages read : %d \t Total messages unread: %d ", i,channel[i].total_messages,channel[i].read_messages,channel[i].unread_messages);
+			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		}
+	}
+
+	printf("I sent all the channel data\n");
+
+	memset(server_buffer, 0, sizeof(server_buffer));
+	sprintf(server_buffer, "-1");
+	send(client_fd, server_buffer, BUFFER_SIZE, 0);
+
+
+}
+
+void sub(char* id){
+	// TODO
+}
+
+void unsub(char* id){
+	// TODO
+}
+
 
