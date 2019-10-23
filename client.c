@@ -30,6 +30,7 @@ void clean_exit(int sig){
 void process_commands(char* buffer);
 void channels_prompt();
 void sub_unsub_prompt();
+void next_prompt();
 void send_prompt();
 
 int main(int argc, char **argv){
@@ -106,6 +107,9 @@ void process_commands(char* buffer){
 	else if (strcmp(command, "SUB") == 0 || strcmp(command, "UNSUB") == 0){
 		sub_unsub_prompt();
 	}
+	else if (strcmp(command, "NEXT") == 0){
+		next_prompt();
+	}
 	else if (strcmp(command, "SEND") == 0) { send_prompt(); } 
 	else {
 		printf("Invalid command or TODO\n");
@@ -142,15 +146,20 @@ void channels_prompt(){
 void sub_unsub_prompt(){
 	bzero(server_buffer, sizeof(server_buffer));
 	recv(server_fd, server_buffer, BUFFER_SIZE, 0);
-	printf("%s", server_buffer);
+	printf("%s\n", server_buffer);
 }
 
-
+void next_prompt(){
+	
+	bzero(server_buffer, sizeof(server_buffer));
+	recv(server_fd, server_buffer, BUFFER_SIZE, 0);
+	printf("%s\n", server_buffer);
+}	
 
 void send_prompt(){
 	bzero(server_buffer, sizeof(server_buffer));
 	recv(server_fd, server_buffer, BUFFER_SIZE, 0);
-	printf("%s", server_buffer);
+	printf("%s\n", server_buffer);
 }
 
 

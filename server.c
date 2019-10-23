@@ -59,10 +59,6 @@ int main(int argc, const char** argv){
 	// exit signal handler
 	signal(SIGINT,clean_exit);
 
-
-
-
-
 	// set port number
 	uint16_t PORT_NUMBER = 12345;
 	if (argc == 2){ PORT_NUMBER = atoi(argv[1]); }
@@ -159,7 +155,6 @@ void process_buffer(char* buffer){
 
 	// get folllowing id, NULL if not
 	char* id = strtok(NULL, " "); // id following command
-
 	char message[BUFFER_SIZE]; // for message string
 	bzero(message, BUFFER_SIZE);
 
@@ -196,7 +191,6 @@ void view_channels(){
 	// send channel information if subscribed	
 	for (int i = 0; i<MAX_CHANNELS;i++){
 		if (channels[i].subscribed == true){
-			printf("%d\n", i);			
 			memset(server_buffer, 0, sizeof(server_buffer));
 			sprintf(server_buffer,"Channel: %d \tTotal messages sent : %d \tTotal messages read : %d \t Total messages unread: %d ", i,channels[i].total_messages,channels[i].read_messages,channels[i].unread_messages);
 			send(client_fd, server_buffer, BUFFER_SIZE, 0);
@@ -214,10 +208,10 @@ void view_channels(){
 void sub(char* id){
 
 	bzero(server_buffer, sizeof(server_buffer));
-	
 	// if id is not provided, send error message
 	if (id == NULL){
-		send(client_fd, "Please provide a channel ID.\n", BUFFER_SIZE, 0);
+		strncpy(server_buffer, "Please provide a channel ID.", sizeof(server_buffer));
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		return;
 	}
 
@@ -245,7 +239,46 @@ void unsub(char* id){
 
 
 void next(char* id){
-	// TODO
+		
+	bzero(server_buffer, sizeof(server_buffer));
+
+
+	if (id == NULL){
+		strncpy(server_buffer, "TODO: parameterless NEXT.", sizeof(server_buffer));
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		return;
+	}
+
+
+	// returns id as integer if valid, or -1 if invalid
+	int id_int = check_id(id);	
+	// if invalid, discontinue
+	if (id_int == -1) { return; }
+
+
+	if (channels[id_int].subscribed == false){
+		sprintf(server_buffer, "Not subscribed to channel %s.", id);
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		return;
+	}
+
+	// index of next unread message
+	int index = channels[id_int].total_messages - channels[id_int].unread_messages; 	
+	// if none unread, message is empty string of index awaiting SEND
+
+	// load unread message into server buffer
+	sprintf(server_buffer, "%s", channels[id_int].messages[index]);
+	
+	// adjust counts if index is not for empty string awaiting SEND
+	if (index != channels[id_int].total_messages){
+		channels[id_int].read_messages += 1;
+		channels[id_int].unread_messages -= 1;	
+	} 
+
+	send(client_fd, server_buffer, BUFFER_SIZE, 0); // send message
+	
+
+		
 }
 
 
@@ -260,25 +293,20 @@ void send_message(char* id, char message[BUFFER_SIZE]){
 	int id_int = check_id(id);
 	// if invalid, discontinue
 	if (id_int == -1) { return; }
-	printf("h\n");	
-	
 
 	// index in array of messages
 	int index = channels[id_int].total_messages;
 	// store message at index of messages, char. by char.	
 	bzero(channels[id_int].messages[index], BUFFER_SIZE);
-	for (int i = 0; i < BUFFER_SIZE; i++){
-		channels[id_int].messages[index][i] = message[i];
-	}
-
-	printf("1\n");
+	sprintf(channels[id_int].messages[index], "%s", message);
+	
 	// increment counts
 	channels[id_int].total_messages += 1;
 	channels[id_int].unread_messages += 1;
-	printf("2\n");
+	
 	// inform client the message has been sent
 	bzero(server_buffer, sizeof(server_buffer));
-	sprintf(server_buffer, "Message sent to channel %s.\n", id);
+	sprintf(server_buffer, "Message sent to channel %s.", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);
 /*	
 channel channels[MAX_CHANNELS] = {{
@@ -306,7 +334,7 @@ int check_id(char* id){
 
 	// if channel is invalid, send error message and return -1
 	if (*flag != '\0' || id_int < 0 || id_int > 255){
-		sprintf(server_buffer, "Invalid channel: %s\n", id);
+		sprintf(server_buffer, "Invalid channel: %s", id);
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		return -1;
 	}
