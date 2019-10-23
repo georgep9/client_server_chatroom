@@ -28,7 +28,9 @@ void clean_exit(int sig){
 }
 
 void process_commands(char* buffer);
-void read_channels();
+void channels_prompt();
+void sub_unsub_prompt();
+void send_prompt();
 
 int main(int argc, char **argv){
 
@@ -98,7 +100,13 @@ void process_commands(char* buffer){
 	char* buffer_cpy = strdup(buffer);
 	char* command = strtok(buffer_cpy, " ");
 	
-	if (strcmp(command, "CHANNELS") == 0) { read_channels(); }
+	if (strcmp(command, "CHANNELS") == 0) { 
+		channels_prompt(); 
+	}
+	else if (strcmp(command, "SUB") == 0 || strcmp(command, "UNSUB") == 0){
+		sub_unsub_prompt();
+	}
+	else if (strcmp(command, "SEND") == 0) { send_prompt(); } 
 	else {
 		printf("Invalid command or TODO\n");
 	}
@@ -106,7 +114,7 @@ void process_commands(char* buffer){
 }
 
 
-void read_channels(){
+void channels_prompt(){
 		//memset(server_buffer, 0, sizeof(server_buffer));
 	/*
     recv(server_fd,server_buffer,BUFFER_SIZE,0);
@@ -126,10 +134,26 @@ void read_channels(){
 			memset(server_buffer, 0, sizeof(server_buffer));
 			recv(server_fd,server_buffer,BUFFER_SIZE,0);
 			
-			
-		
 		}
 
-	printf("%s\n", server_buffer);
+
 }
+
+void sub_unsub_prompt(){
+	bzero(server_buffer, sizeof(server_buffer));
+	recv(server_fd, server_buffer, BUFFER_SIZE, 0);
+	printf("%s", server_buffer);
+}
+
+
+
+void send_prompt(){
+	bzero(server_buffer, sizeof(server_buffer));
+	recv(server_fd, server_buffer, BUFFER_SIZE, 0);
+	printf("%s", server_buffer);
+}
+
+
+
+
 

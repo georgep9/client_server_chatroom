@@ -7,113 +7,52 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <stdbool.h>
-#include <time.h>
 
 #define BUFFER_SIZE 1024
 #define QUEUE_SIZE 10
 #define MAX_CHANNELS 255
 
-/////////////////////////////////////////////////////////////////////////////////////
-// Global variable area
+int server_fd;
+int client_fd;
+
+// buffer for receiving messages from client
+char client_buffer[BUFFER_SIZE*2];
+	
+// buffer for sending messages
+char server_buffer[BUFFER_SIZE*2];
+
+// struct for channels
 typedef struct channel_data_t{
 	bool is_subscribed;
 	int total_messages;
 	int unread_messages;
 	int read_messages;
-	char next_string;
+	char next_string[BUFFER_SIZE];
 } channel_data;
 
+// initiate channels
 channel_data channel[MAX_CHANNELS];
 
-// Server socked ID
-int server_fd;
+void clean_exit(int sig);	
 
-// Socket ID for sending and receiving data
-int client_fd;
-
-// buffer for receiving messages from client
-char client_buffer[BUFFER_SIZE];
-
-// buffer for sending messages
-char server_buffer[BUFFER_SIZE];
-
-//////////////////////////////////////////////////
-/// FUNCTION AREA
-
-void delay(int s){
-	int milli_seconds = 1000*s;
-
-	clock_t start = clock();
-	while (clock() < start + milli_seconds){
-
-	}
-}
-
-void send_channel_data(){
-	
-
-	printf("ABout to send subscription data\n");
-
-	for (int i = 0; i<MAX_CHANNELS;i++){
-		if (channel[i].is_subscribed == true){
-			memset(server_buffer, 0, sizeof(server_buffer));
-			sprintf(server_buffer,"Channel: %d \tTotal messages sent : %d \tTotal messages read : %d \t Total messages unread: %d ", i,channel[i].total_messages,channel[i].read_messages,channel[i].unread_messages);
-			send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		}
-	}
-
-	printf("I sent all the channel data\n");
-
-	memset(server_buffer, 0, sizeof(server_buffer));
-	sprintf(server_buffer, "-1");
-	send(client_fd, server_buffer, BUFFER_SIZE, 0);
-}
-
-void check_option(char *choice_str){
-
-	//TESTING FOR CHANNEL INPUT
-	if (strcmp("CHANNELS",choice_str) == 0){
-
-		//char channel_message[] = {"YOU WILL GET YOUR CHANNELS"};
-		//send(client_fd, "YOU WILL GET YOUR CHANNELS", strlen("YOU WILL GET YOUR CHANNELS"), 0);
-		send_channel_data();
-
-		}
-	else {
-		
-		memset(server_buffer, 0, sizeof(server_buffer));
-		sprintf(server_buffer, "Invalid command. enter option on list\n");
-		send(client_fd, server_buffer, strlen(server_buffer), 0);
-		printf("sent nothing!\n");
-
-	}
-	
-}
-
-
-////////////////////////////////////////////////
-
-void clean_exit(int signum){
-	
-	/* TODO
-
-	deal  elegantly  with  any  threads  that  have  been  created  
-	as  well  as  any  open  sockets,  shared  memory  regions,  
-	dynamically allocated memory and/or open files
-	
-	*/
-
-	close(server_fd);
-	close(client_fd);
-	exit(1);
-
-}
+void process_buffer(char* buffer);
+void channels();
+void sub(char* id);
+void unsub(char* id);
+void next(char* id);
+void livefeed(char* id);
+void send_message(char* id, char* message);
+void bye();
 
 int main(int argc, const char** argv){
 
 
 	// exit signal handler
 	signal(SIGINT,clean_exit);
+
+
+
+
 
 	// set port number
 	uint16_t PORT_NUMBER = 12345;
@@ -157,23 +96,28 @@ int main(int argc, const char** argv){
 		perror("accept");
 	}
 
-	printf("Connection made! Client ID: %d\n", client_fd);
+	printf("Connection made! Client ID: %d\n\n", client_fd);
 
-	// send client welcome message	
-	sprintf(server_buffer, "Welcome! Your client ID is %d", client_fd);
-	send(client_fd, server_buffer, strlen(server_buffer), 0);
-	
+	// send client welcome message
+	char welcome_message[BUFFER_SIZE];	
+	sprintf(welcome_message, "Welcome! Your client ID is %d", client_fd);
+	send(client_fd, welcome_message, strlen(welcome_message), 0);
+
+
 	while (1){
 
 		// clear buffers
-		memset(server_buffer, 0, sizeof(server_buffer));
-		memset(client_buffer, 0, sizeof(client_buffer));
+		bzero(server_buffer, BUFFER_SIZE*2);
+		bzero(client_buffer, BUFFER_SIZE*2);
 		
-		recv(client_fd, client_buffer, BUFFER_SIZE, 0); // receive client message
+		
+		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
+		
+		printf("\n[CLIENT %d] -------------\n", client_fd);
+		process_buffer(client_buffer);
 
-		printf("[CLIENT %d]: %s\n", client_fd, client_buffer); // display messaeck
-		
-		check_option(client_buffer);
+		// send feedback
+		send(client_fd, server_buffer, strlen(server_buffer), 0); // send feedback
 	}
 
 	close(server_fd);
@@ -182,4 +126,127 @@ int main(int argc, const char** argv){
 
 
 }
+
+
+void clean_exit(int signum){
+	
+	/* TODO
+
+	deal  elegantly  with  any  threads  that  have  been  created  
+	as  well  as  any  open  sockets,  shared  memory  regions,  
+	dynamically allocated memory and/or open files
+	
+	*/
+
+	close(server_fd);
+	close(client_fd);
+	exit(1);
+
+}
+
+void process_buffer(char* buffer){
+	
+	// get command string from buffer
+	char* buffer_cpy = strdup(buffer);
+	char* command = strtok(buffer_cpy, " ");
+
+	// get folllowing id, NULL if not
+	char* id = strtok(NULL, " "); // id following command
+
+	char message[BUFFER_SIZE]; // for message string
+	bzero(message, BUFFER_SIZE);
+
+	// attempt to store mesasge string if id is provided	
+	if (id != NULL){		
+		// starting position for message
+		int start = strlen(command) + 1 + strlen(id) + 1; 
+		// iterate and store characters from buffer, following start position 
+		for (int i = start; i < strlen(buffer); i++){
+			message[i - start] = buffer[i]; 
+		}	
+	}		
+	
+	// display and send feedback
+	char feedback[BUFFER_SIZE*2];
+	sprintf(feedback, "\nCommand:%s\nChannel ID: %s\nMessage: %s\n\n", command, id, message);
+	printf("%s", feedback);
+
+	
+	if (strcmp(command, "CHANNELS") == 0){ channels(); }
+	else if (strcmp(command, "SUB") == 0){
+		printf("this worked\n");
+		sub(id); }
+	else if (strcmp(command, "UNSUB") == 0){ unsub(id); }
+	else {
+		printf("Invalid command or TODO\n");
+		printf("%d\n",strcmp(command, "SUB"));
+	}
+
+	
+}
+
+void channels(){
+	printf("\nABout to send subscription data\n");
+
+	for (int i = 0; i<MAX_CHANNELS;i++){
+		if (channel[i].is_subscribed == true){
+			memset(server_buffer, 0, sizeof(server_buffer));
+			sprintf(server_buffer,"Channel: %d \tTotal messages sent : %d \tTotal messages read : %d \t Total messages unread: %d ", i,channel[i].total_messages,channel[i].read_messages,channel[i].unread_messages);
+			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		}
+	}
+	printf("I sent all the channel data\n");
+
+	memset(server_buffer, 0, sizeof(server_buffer));
+	sprintf(server_buffer, "-1");
+	send(client_fd, server_buffer, BUFFER_SIZE, 0);
+	memset(server_buffer, 0, sizeof(server_buffer));
+}
+
+void sub(char* id){
+
+	printf("Tapinda apa\n");
+	if (id == NULL){
+		memset(server_buffer, 0, sizeof(server_buffer));
+		sprintf(server_buffer, "Invalid channel %s",id);
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		printf("Invalid channel %s\n",id);
+		printf("Tapinda apa  2\n");
+	}else{
+		int index = atoi(id);
+		//printf("\nSUB SERVER SIDE; CHANNEL ID ATMPT: %d from %s\n",index,id);
+		
+		if ((strcmp("0",id)==0) | ((index>0) & (index <= 255))){
+
+			if (channel[index].is_subscribed == true){
+				memset(server_buffer, 0, sizeof(server_buffer));
+				sprintf(server_buffer, "Already subscribed to channel %d",index);
+				send(client_fd, server_buffer, BUFFER_SIZE, 0);
+				printf("Already subscribed to channel %d\n",index);
+				
+			}else{
+				channel[index].is_subscribed = true;
+				channel[index].read_messages = 0;
+				channel[index].unread_messages = 0;
+				//channel[index].next_string = "";
+				memset(channel[index].next_string, 0, sizeof(channel[index].next_string));
+
+				memset(server_buffer, 0, sizeof(server_buffer));
+				sprintf(server_buffer, "Subscribed to channel %d",index);
+				send(client_fd, server_buffer, BUFFER_SIZE, 0);
+				printf("Subscribed to channel %d\n",index);
+			}
+		}else{
+			memset(server_buffer, 0, sizeof(server_buffer));
+			sprintf(server_buffer, "Invalid channel %s",id);
+			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+			printf("Invalid channel %s",id);
+		}
+	}
+}
+
+void unsub(char* id){
+	// TODO
+}
+
 
