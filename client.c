@@ -12,6 +12,12 @@
 
 int server_fd;
 
+// buffer for receiving messages from server
+char server_buffer[BUFFER_SIZE*2];
+
+// buffer for sending messages
+char client_buffer[BUFFER_SIZE*2];
+	
 // safely exit client process
 void clean_exit(int sig){
 	
@@ -21,16 +27,13 @@ void clean_exit(int sig){
 	exit(1);
 }
 
+void process_commands(char* buffer);
+void read_channels();
+
 int main(int argc, char **argv){
 
 	signal(SIGINT, clean_exit);
 
-	// buffer for receiving messages from server
-	char server_buffer[BUFFER_SIZE];
-
-	// buffer for sending messages
-	char client_buffer[BUFFER_SIZE];
-	
 	// expect 2 input arguments
 	if (argc < 3) {
 		printf("Please provide hostname and port.\n");	
@@ -60,33 +63,73 @@ int main(int argc, char **argv){
 	}
 
 	// read and print welcome message from server
-	read(server_fd, server_buffer, BUFFER_SIZE);
-	printf("%s\n", server_buffer);
+	char welcome_message[BUFFER_SIZE];
+	read(server_fd, welcome_message, BUFFER_SIZE);
+	printf("%s\n", welcome_message);
 
 	while (1){
 
 		// clear buffers
-		memset(server_buffer, 0, sizeof(server_buffer));
-		memset(client_buffer, 0, sizeof(client_buffer));
+		bzero(server_buffer, BUFFER_SIZE*2);
+		bzero(client_buffer, BUFFER_SIZE*2);
 	
-		printf("Input: ");
+		printf("\nInput: ");
 		
 		// message from user input
-		char* check = fgets(client_buffer, BUFFER_SIZE, stdin); 
+		char* check = fgets(client_buffer, BUFFER_SIZE*2, stdin); 
 		if (check == NULL || strlen(check) == 1){
 			continue; // error or only newline
 		 }
-
+		
 		// remove newline char
 		client_buffer[strlen(client_buffer) - 1] = 0;	
-
 		send(server_fd, client_buffer, strlen(client_buffer), 0); // send to server
-
-		recv(server_fd, server_buffer, BUFFER_SIZE, 0); // feedback from server
 		
-		printf("%s\n", server_buffer); // display feedback from server
+		process_commands(client_buffer);
+			
+	
 	}
 
 	close(server_fd);
 
 }
+
+void process_commands(char* buffer){
+	char* buffer_cpy = strdup(buffer);
+	char* command = strtok(buffer_cpy, " ");
+	
+	if (strcmp(command, "CHANNELS") == 0) { read_channels(); }
+	else {
+		printf("Invalid command or TODO\n");
+	}
+
+}
+
+
+void read_channels(){
+		//memset(server_buffer, 0, sizeof(server_buffer));
+	/*
+    recv(server_fd,server_buffer,BUFFER_SIZE,0);
+	printf("RECEIVED: %s \n",server_buffer);
+
+	memset(server_buffer, 0, sizeof(server_buffer));
+	recv(server_fd,server_buffer,BUFFER_SIZE,0);
+	printf("received: %s \n",server_buffer);
+	*/
+
+	recv(server_fd,server_buffer,BUFFER_SIZE,0);
+		while ((strcmp(server_buffer,"-1")) != 0 )
+		{
+			printf("%s\n",server_buffer);
+
+			//Clear buffer and take next line of data
+			memset(server_buffer, 0, sizeof(server_buffer));
+			recv(server_fd,server_buffer,BUFFER_SIZE,0);
+			
+			
+		
+		}
+
+	printf("%s\n", server_buffer);
+}
+
