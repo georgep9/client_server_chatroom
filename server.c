@@ -215,6 +215,7 @@ void view_channels(){
 
 void sub(char* id){
 
+	
 	bzero(server_buffer, sizeof(server_buffer));
 	// if id is not provided, send error message
 	if (id == NULL){
@@ -239,10 +240,15 @@ void sub(char* id){
 	clear_old_messages(id_int);
 	sprintf(server_buffer, "Subscribed to channel %s.", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);	
+
+	subscriptions += 1;
+
+
 }	
 
 
 void unsub(char* id){
+
 
 	bzero(server_buffer, sizeof(server_buffer));
 	// if id is not provided, send error message
@@ -258,15 +264,17 @@ void unsub(char* id){
 	if (id_int == -1) { return; }
 
 	// if channel is already subscribed to, unsub
-	if (channels[id_int].subscribed == true){
-		channels[id_int].subscribed = false;
-		sprintf(server_buffer, "Unsubscribed to channel %s.", id);
+	if (channels[id_int].subscribed == false){
+		sprintf(server_buffer, "Not subscribed to channel %s.", id);
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		return;
 	}
 	
-	sprintf(server_buffer, "Already unsubscribed to channel %s", id);
+	channels[id_int].subscribed = false;
+	sprintf(server_buffer, "Unsubscribed to channel %s", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);
+
+	subscriptions -= 1;
 
 }
 
@@ -275,16 +283,32 @@ void next(char* id){
 		
 	bzero(server_buffer, sizeof(server_buffer));
 
+
 	if (id == NULL){
-		strncpy(server_buffer, "TODO: parameterless NEXT.", sizeof(server_buffer));
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		if (subscriptions == 0){
+			strncpy(server_buffer, "Not subscribed to any channels.", BUFFER_SIZE);
+			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		}
+		else if (head != NULL){
+			char head_id[3];
+			int id_int = head->channel_id;
+			sprintf(head_id, "%d", id_int);
+			next(head_id);
+		}
+		else {
+			strncpy(server_buffer, " ", BUFFER_SIZE);
+			send(client_fd, server_buffer, BUFFER_SIZE, 0); 
+		}	
+		
 		return;
 	}
+
 
 	// returns id as integer if valid, or -1 if invalid
 	int id_int = check_id(id);	
 	// if invalid, discontinue
 	if (id_int == -1) { return; }
+
 
 	if (channels[id_int].subscribed == false){
 		sprintf(server_buffer, "Not subscribed to channel %s.", id);
@@ -297,7 +321,7 @@ void next(char* id){
 	// if none unread, message is empty string of index awaiting SEND
 
 	// load unread message into server buffer
-	sprintf(server_buffer, "CHANNEL %d: %s",id_int ,channels[id_int].messages[index]);
+	sprintf(server_buffer, "%s", channels[id_int].messages[index]);
 	
 	// adjust counts if index is not for empty string awaiting SEND
 	if (index != channels[id_int].total_messages){
@@ -306,7 +330,37 @@ void next(char* id){
 	} 
 
 	send(client_fd, server_buffer, BUFFER_SIZE, 0); // send message
-		
+
+
+	// update linked list of channels order of sent messages	
+	next_node_t* temp = head;
+	next_node_t* prev = head;
+	for (; temp != NULL; temp=temp->next){
+		if (temp->channel_id == id_int){
+			if (temp == head){
+				if (head != end){
+					head = head->next;
+					free(temp);
+				}
+				else { // if node is head & end
+					free(temp);
+					head = NULL; 
+					end = NULL; 
+				}
+			} 
+			else if (temp == end){
+				end = prev;
+				end->next = NULL;
+				free(temp);
+			}
+			else {
+				prev->next = temp->next;
+				free(temp);	
+			}
+			break;
+		}
+		prev = temp;
+	}	
 }
 
 
@@ -377,15 +431,30 @@ void send_message(char* id, char message[BUFFER_SIZE]){
 	// store message at index of messages, char. by char.	
 	bzero(channels[id_int].messages[index], BUFFER_SIZE);
 	sprintf(channels[id_int].messages[index], "%s", message);
-	
-	// increment counts
-	channels[id_int].total_messages += 1;
-	channels[id_int].unread_messages += 1;
-	
+
 	// inform client the message has been sent
 	bzero(server_buffer, sizeof(server_buffer));
 	sprintf(server_buffer, "Message sent to channel %s.", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);
+
+		
+	// increment counts
+	channels[id_int].total_messages += 1;
+	channels[id_int].unread_messages += 1;
+	
+	if (channels[id_int].subscribed == true){
+		next_node_t * new_next = (next_node_t*)malloc(sizeof(next_node_t));
+		new_next->channel_id = id_int;		
+		new_next->next = NULL;
+		if (end != NULL){
+			end->next = new_next;
+		}
+		else{
+			head = new_next; 
+		}
+		end = new_next;
+	}	
+
 }
 
 
