@@ -23,6 +23,10 @@ char client_buffer[BUFFER_SIZE*2];
 // buffer for sending messages
 char server_buffer[BUFFER_SIZE*2];
 
+// The Server address struct and its length
+struct sockaddr_in addr;
+int addrlen = sizeof(addr);
+
 // structure for channel
 typedef struct channel_t {
 	bool subscribed;
@@ -52,7 +56,10 @@ void send_message(char* id, char message[BUFFER_SIZE]);
 void bye();
 void clear_old_messages(int id);
 void runtime();
+void livefeed_all();
 int check_id(char* id);
+void connect_client();
+
 
 
 int main(int argc, const char** argv){
@@ -61,9 +68,7 @@ int main(int argc, const char** argv){
 	uint16_t PORT_NUMBER = 12345;
 	if (argc == 2){ PORT_NUMBER = atoi(argv[1]); }
 
-	// setup server address and port
-	struct sockaddr_in addr;
-	int addrlen = sizeof(addr);	
+	// setup server address and port	
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	addr.sin_port = htons(PORT_NUMBER);
@@ -81,39 +86,13 @@ int main(int argc, const char** argv){
 		exit(1);
 	}
 
-
-	// set to listen for clients
-	if (listen(server_fd, QUEUE_SIZE) == -1) {
-		fprintf(stderr, "Failed to listen on socket\n");
-		close(server_fd);
-		exit(1);
-	}	
-
-
-	
-
-	printf("Waiting for a client to connect...\n");
-
-	client_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
-	if (client_fd == -1){
-		perror("accept");
-	}
-
-	printf("Connection made! Client ID: %d\n\n", client_fd);
-
-	// send client welcome message
-	char welcome_message[BUFFER_SIZE];	
-	sprintf(welcome_message, "Welcome! Your client ID is %d", client_fd);
-	send(client_fd, welcome_message, strlen(welcome_message), 0);
-
+	connect_client();
 	////////////////////////////// THE WHILE LOOP WAS PREVIOUSLY HERE
 	runtime();
 	/////////////////////////////////////////////////////////////
 
 	close(server_fd);
 	close(client_fd);
-
-
 
 }
 
@@ -135,40 +114,49 @@ void clean_exit(int signum){
 }
 
 void process_buffer(char* buffer){
+	printf("APA iPAPA\n");
 	
-	// get command string from buffer
-	char* buffer_cpy = strdup(buffer);
-	char* command = strtok(buffer_cpy, " ");
+	if (strcmp(buffer,"BYE") != 0){
+		printf("DUN MADE IT\n");
+		printf("The goods: %s !!!\n",buffer);
+		// get command string from buffer
+		char* buffer_cpy = strdup(buffer);
+		char* command = strtok(buffer_cpy, " ");
 
-	// get folllowing id, NULL if not
-	char* id = strtok(NULL, " "); // id following command
-	char message[BUFFER_SIZE]; // for message string
-	bzero(message, BUFFER_SIZE);
+		// get folllowing id, NULL if not
+		char* id = strtok(NULL, " "); // id following command
+		char message[BUFFER_SIZE]; // for message string
+		bzero(message, BUFFER_SIZE);
 
-	// attempt to store mesasge string if id is provided	
-	if (id != NULL){		
-		// starting position for message
-		int start = strlen(command) + 1 + strlen(id) + 1; 
-		// iterate and store characters from buffer, following start position 
-		for (int i = start; i < strlen(buffer); i++){
-			message[i - start] = buffer[i]; 
-		}	
-	}		
-	
-	// display and send feedback
-	char feedback[BUFFER_SIZE*2];
-	sprintf(feedback, "\nCommand: %s\nChannel ID: %s\nMessage: %s\n\n", command, id, message);
-	printf("%s", feedback);
+		// attempt to store mesasge string if id is provided	
+		if (id != NULL){		
+			// starting position for message
+			int start = strlen(command) + 1 + strlen(id) + 1; 
+			// iterate and store characters from buffer, following start position 
+			for (int i = start; i < strlen(buffer); i++){
+				message[i - start] = buffer[i]; 
+			}	
+		}		
+		
+		// display and send feedback
+		char feedback[BUFFER_SIZE*2];
+		sprintf(feedback, "\nCommand: %s\nChannel ID: %s\nMessage: %s\n\n", command, id, message);
+		printf("%s", feedback);
 
-	// given the command string, run corresponding function 	
-	if (strcmp(command, "CHANNELS") == 0) { view_channels(); }
-	else if (strcmp(command, "SUB") == 0) { sub(id); }
-	else if (strcmp(command, "UNSUB") == 0) { unsub(id); }
-	else if (strcmp(command, "NEXT") == 0) { next(id); }
-	else if (strcmp(command, "LIVEFEED") == 0) { livefeed(id); }
-	else if (strcmp(command, "SEND") == 0) { send_message(id, message); }
-	else if (strcmp(command, "BYE") == 0) { bye(); }
-	else { printf("Invalid command or TODO\n"); }
+		// given the command string, run corresponding function 	
+		if (strcmp(command, "CHANNELS") == 0) { view_channels(); }
+		else if (strcmp(command, "SUB") == 0) { sub(id); }
+		else if (strcmp(command, "UNSUB") == 0) { unsub(id); }
+		else if (strcmp(command, "NEXT") == 0) { next(id); }
+		else if (strcmp(command, "LIVEFEED") == 0) { livefeed(id); }
+		else if (strcmp(command, "SEND") == 0) { send_message(id, message); }
+		else if (strcmp(command, "BYE") == 0) { bye(); }
+		else { printf("Invalid command or TODO\n"); }
+
+	}else{
+		printf("BYE BYE CLIENT! %d\n", client_fd);
+		bye();
+	}
 	
 }
 
@@ -254,19 +242,16 @@ void next(char* id){
 		
 	bzero(server_buffer, sizeof(server_buffer));
 
-
 	if (id == NULL){
 		strncpy(server_buffer, "TODO: parameterless NEXT.", sizeof(server_buffer));
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		return;
 	}
 
-
 	// returns id as integer if valid, or -1 if invalid
 	int id_int = check_id(id);	
 	// if invalid, discontinue
 	if (id_int == -1) { return; }
-
 
 	if (channels[id_int].subscribed == false){
 		sprintf(server_buffer, "Not subscribed to channel %s.", id);
@@ -279,7 +264,7 @@ void next(char* id){
 	// if none unread, message is empty string of index awaiting SEND
 
 	// load unread message into server buffer
-	sprintf(server_buffer, "%s", channels[id_int].messages[index]);
+	sprintf(server_buffer, "CHANNEL %d: %s",id_int ,channels[id_int].messages[index]);
 	
 	// adjust counts if index is not for empty string awaiting SEND
 	if (index != channels[id_int].total_messages){
@@ -298,8 +283,11 @@ void livefeed(char* id){
 	// NEXT when the number of unread messages is > than 0
 
 	if (id == NULL){
-		strncpy(server_buffer, "TODO: parameterless LIVEFEED.", sizeof(server_buffer));
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		/*
+			strncpy(server_buffer, "TODO: parameterless LIVEFEED.", sizeof(server_buffer));
+			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		*/
+		livefeed_all();
 		return;
 	}
 
@@ -311,7 +299,8 @@ void livefeed(char* id){
 		// Sends livestream disabling sequence to client
 		sprintf(server_buffer, " \n\n");
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		return; }
+		return; 
+	}
 
 	if (channels[id_int].subscribed == false){
 		sprintf(server_buffer, "Not subscribed to channel %s.", id);
@@ -331,7 +320,7 @@ void livefeed(char* id){
 		}else{
 			sprintf(server_buffer," \n");
 			send(client_fd,server_buffer, BUFFER_SIZE,0);
-			printf("All messages sent\n");
+			//printf("All messages sent\n");
 		}
 		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
 	}
@@ -368,7 +357,12 @@ void send_message(char* id, char message[BUFFER_SIZE]){
 
 
 void bye(){
-	// TODO
+	for (int i = 0; i<255;i++){
+		channels[i].subscribed = false;
+		channels[i].unread_messages = 0;
+		channels[i].read_messages = 0;
+	}
+	connect_client();
 }
 
 
@@ -425,8 +419,64 @@ void runtime(){
 	}
 }
 
+void livefeed_all(){
+	int id_int =0;
+	printf("Want a livefeed of all channels?\n");
+	while (strcmp(client_buffer,"-1") != 0)
+	{
+		printf("RUNNING!\n");
+		bzero(client_buffer, BUFFER_SIZE*2);
 
+		if (channels[id_int].subscribed == true){
+			printf("Looking at channel %d. \n", id_int);
+			if (channels[id_int].unread_messages > 0){
+				next((char *) &id_int);
+			}else{
+				id_int++;
+				sprintf(server_buffer," \n");
+				send(client_fd,server_buffer, BUFFER_SIZE,0);
+				//printf("All messages sent\n");
+			}
+		}else{
+			id_int++;
+			
+		}
 
+		if (id_int > 255){
+			id_int = 0;
+		}		
+		printf("Stuck here\n");
+		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
+	}
 
+	// Will return client to normal operation
+	sprintf(server_buffer," \n\n");
+	send(client_fd,server_buffer, BUFFER_SIZE,0);
+}
+
+void connect_client(){
+	
+	// set to listen for clients
+	if (listen(server_fd, QUEUE_SIZE) == -1) {
+		fprintf(stderr, "Failed to listen on socket\n");
+		close(server_fd);
+		exit(1);
+	}	
+
+	printf("Waiting for a client to connect...\n");
+
+	client_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
+	if (client_fd == -1){
+		perror("accept");
+	}
+
+	printf("Connection made! Client ID: %d\n\n", client_fd);
+
+	// send client welcome message
+	char welcome_message[BUFFER_SIZE];	
+	sprintf(welcome_message, "Welcome! Your client ID is %d", client_fd);
+	send(client_fd, welcome_message, strlen(welcome_message), 0);
+
+}
 
 

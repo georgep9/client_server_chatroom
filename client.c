@@ -35,6 +35,7 @@ void send_prompt();
 void livefeed_prompt();
 void runtime();
 void end_feed();
+void connect_client(char **argv);
 
 int main(int argc, char **argv){
 	signal(SIGINT, clean_exit);
@@ -44,40 +45,14 @@ int main(int argc, char **argv){
 		printf("Please provide hostname and port.\n");	
 		exit(1);
 	}
-	// assign hostname and port values
-	char* server_name = argv[1];
-	int PORT = atoi(argv[2]);
-	
-	// create client socket
-	if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
-		fprintf(stderr, "Failed to create socket\n");
-		exit(1);	
-	}
 
-	// setup struct of server address and port
-	struct sockaddr_in server_addr;
-	inet_pton(AF_INET, server_name, &server_addr.sin_addr);
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(PORT);
-
-	// connect to server socket
-	if (connect(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
-		fprintf(stderr, "Failed to connect.\n");
-		close(server_fd);
-		exit(1);
-	}
-
-	// read and print welcome message from server
-	char welcome_message[BUFFER_SIZE];
-	read(server_fd, welcome_message, BUFFER_SIZE);
-	printf("%s\n", welcome_message);
-
+	///////////////////////////////////////////////////////////
+	connect_client(argv);
 	////////////////////////////// THE WHILE LOOP WAS PREVIOUSLY HERE
 	runtime();
 	/////////////////////////////////////////////////////////////
 
 	close(server_fd);
-
 }
 
 void process_commands(char* buffer){
@@ -95,7 +70,8 @@ void process_commands(char* buffer){
 	}
 	else if (strcmp(command, "LIVEFEED") == 0) { livefeed_prompt(); } 
 	else if (strcmp(command, "SEND") == 0) { send_prompt(); } 
-	else {
+	else if (strcmp(command, "BYE") == 0){ clean_exit(SIGINT);}
+	else{
 		printf("Invalid command or TODO\n");
 	}
 
@@ -174,10 +150,9 @@ void runtime(){
 		
 		// remove newline char
 		client_buffer[strlen(client_buffer) - 1] = 0;	
-		send(server_fd, client_buffer, strlen(client_buffer), 0); // send to server
 		
 		process_commands(client_buffer);
-			
+		send(server_fd, client_buffer, strlen(client_buffer), 0); // send to server		
 	
 	}
 }
@@ -192,3 +167,33 @@ void end_feed(){
 	//runtime();
 }
 
+void connect_client(char **argv){
+	// assign hostname and port values
+	char* server_name = argv[1];
+	int PORT = atoi(argv[2]);
+	
+	// create client socket
+	if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+		fprintf(stderr, "Failed to create socket\n");
+		exit(1);	
+	}
+
+	// setup struct of server address and port
+	struct sockaddr_in server_addr;
+	inet_pton(AF_INET, server_name, &server_addr.sin_addr);
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_port = htons(PORT);
+
+	// connect to server socket
+	if (connect(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+		fprintf(stderr, "Failed to connect.\n");
+		close(server_fd);
+		exit(1);
+	}
+
+	// read and print welcome message from server
+	char welcome_message[BUFFER_SIZE];
+	read(server_fd, welcome_message, BUFFER_SIZE);
+	printf("%s\n", welcome_message);
+}
+	
