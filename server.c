@@ -65,6 +65,8 @@ void clear_old_messages(int id);
 void runtime();
 int check_id(char* id);
 
+int subscriptions = 0;
+
 
 int main(int argc, const char** argv){
 
@@ -230,6 +232,8 @@ void sub(char* id){
 	clear_old_messages(id_int);
 	sprintf(server_buffer, "Subscribed to channel %s.", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);	
+
+	subscriptions += 1;
 }	
 
 
@@ -259,6 +263,7 @@ void unsub(char* id){
 	sprintf(server_buffer, "Already unsubscribed to channel %s", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);
 
+	subscriptions -= 1;
 }
 
 
@@ -268,16 +273,21 @@ void next(char* id){
 
 
 	if (id == NULL){
-
-
-		next_node_t* temp = head;
-
-		for (; temp != NULL; temp=temp->next){
-			printf("%d\n",temp->channel_id);
+		if (subscriptions == 0){
+			strncpy(server_buffer, "Not subscribed to any channels.", BUFFER_SIZE);
+			send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		}
-
-		strncpy(server_buffer, "TODO: parameterless NEXT.", sizeof(server_buffer));
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		else if (head != NULL){
+			char head_id[3];
+			int id_int = head->channel_id;
+			sprintf(head_id, "%d", id_int);
+			next(head_id);
+		}
+		else {
+			strncpy(server_buffer, " ", BUFFER_SIZE);
+			send(client_fd, server_buffer, BUFFER_SIZE, 0); 
+		}	
+		
 		return;
 	}
 
@@ -308,23 +318,34 @@ void next(char* id){
 	} 
 
 	send(client_fd, server_buffer, BUFFER_SIZE, 0); // send message
-	
+
+
+	// update linked list of channels order of sent messages	
 	next_node_t* temp = head;
 	next_node_t* prev = head;
 	for (; temp != NULL; temp=temp->next){
 		if (temp->channel_id == id_int){
-			if (temp == end){
-				end = prev;
-			}
 			if (temp == head){
-				head = head->next;
-				free(temp);
+				if (head != end){
+					head = head->next;
+					free(temp);
+				}
+				else { // if node is head & end
+					free(temp);
+					head = NULL; 
+					end = NULL; 
+				}
 			} 
+			else if (temp == end){
+				end = prev;
+				end->next = NULL;
+				free(temp);
+			}
 			else {
 				prev->next = temp->next;
 				free(temp);	
 			}
-	
+			break;
 		}
 		prev = temp;
 	}	
