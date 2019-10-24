@@ -32,9 +32,11 @@ void channels_prompt();
 void sub_unsub_prompt();
 void next_prompt();
 void send_prompt();
+void livefeed_prompt();
+void runtime();
+void end_feed();
 
 int main(int argc, char **argv){
-
 	signal(SIGINT, clean_exit);
 
 	// expect 2 input arguments
@@ -67,31 +69,13 @@ int main(int argc, char **argv){
 
 	// read and print welcome message from server
 	char welcome_message[BUFFER_SIZE];
+	bzero(welcome_message, BUFFER_SIZE);
 	read(server_fd, welcome_message, BUFFER_SIZE);
 	printf("%s\n", welcome_message);
 
-	while (1){
-
-		// clear buffers
-		bzero(server_buffer, BUFFER_SIZE*2);
-		bzero(client_buffer, BUFFER_SIZE*2);
-	
-		printf("\nInput: ");
-		
-		// message from user input
-		char* check = fgets(client_buffer, BUFFER_SIZE*2, stdin); 
-		if (check == NULL || strlen(check) == 1){
-			continue; // error or only newline
-		 }
-		
-		// remove newline char
-		client_buffer[strlen(client_buffer) - 1] = 0;	
-		send(server_fd, client_buffer, strlen(client_buffer), 0); // send to server
-		
-		process_commands(client_buffer);
-			
-	
-	}
+	////////////////////////////// THE WHILE LOOP WAS PREVIOUSLY HERE
+	runtime();
+	/////////////////////////////////////////////////////////////
 
 	close(server_fd);
 
@@ -110,6 +94,7 @@ void process_commands(char* buffer){
 	else if (strcmp(command, "NEXT") == 0){
 		next_prompt();
 	}
+	else if (strcmp(command, "LIVEFEED") == 0) { livefeed_prompt(); } 
 	else if (strcmp(command, "SEND") == 0) { send_prompt(); } 
 	else {
 		printf("Invalid command or TODO\n");
@@ -117,29 +102,18 @@ void process_commands(char* buffer){
 
 }
 
-
 void channels_prompt(){
-		//memset(server_buffer, 0, sizeof(server_buffer));
-	/*
-    recv(server_fd,server_buffer,BUFFER_SIZE,0);
-	printf("RECEIVED: %s \n",server_buffer);
-
-	memset(server_buffer, 0, sizeof(server_buffer));
+	
 	recv(server_fd,server_buffer,BUFFER_SIZE,0);
-	printf("received: %s \n",server_buffer);
-	*/
+	while ((strcmp(server_buffer,"-1")) != 0 )
+	{
+		printf("%s\n",server_buffer);
 
-	recv(server_fd,server_buffer,BUFFER_SIZE,0);
-		while ((strcmp(server_buffer,"-1")) != 0 )
-		{
-			printf("%s\n",server_buffer);
-
-			//Clear buffer and take next line of data
-			memset(server_buffer, 0, sizeof(server_buffer));
-			recv(server_fd,server_buffer,BUFFER_SIZE,0);
-			
-		}
-
+		//Clear buffer and take next line of data
+		memset(server_buffer, 0, sizeof(server_buffer));
+		recv(server_fd,server_buffer,BUFFER_SIZE,0);
+		
+	}
 
 }
 
@@ -162,7 +136,61 @@ void send_prompt(){
 	printf("%s\n", server_buffer);
 }
 
+void livefeed_prompt(){
+	signal(SIGINT,end_feed);
 
+	while (strcmp(server_buffer," \n\n") != 0){
 
+		bzero(server_buffer, sizeof(server_buffer));
+		bzero(client_buffer, sizeof(client_buffer));
+
+		recv(server_fd, server_buffer, BUFFER_SIZE, 0);
+		
+		if (strcmp(server_buffer," \n") != 0 && strcmp(server_buffer," \n\n") != 0 ){
+			printf("%s\n", server_buffer);
+		}
+
+		// send to server blank messages because it is expecting a terminating -1 (which is sent after SIGINT is flagged)
+		sprintf(client_buffer," \n");
+		send(server_fd, client_buffer, strlen(client_buffer), 0);
+	}
+	
+}
+
+void runtime(){
+	signal(SIGINT, clean_exit);
+	while (1){
+
+		// clear buffers
+		bzero(server_buffer, BUFFER_SIZE*2);
+		bzero(client_buffer, BUFFER_SIZE*2);
+	
+		printf("\nInput: ");
+		
+		// message from user input
+		char* check = fgets(client_buffer, BUFFER_SIZE*2, stdin); 
+		if (check == NULL || strlen(check) == 1){
+			continue; // error or only newline
+		 }
+		
+		// remove newline char
+		client_buffer[strlen(client_buffer) - 1] = 0;	
+		send(server_fd, client_buffer, strlen(client_buffer), 0); // send to server
+		
+		process_commands(client_buffer);
+			
+	
+	}
+}
+
+void end_feed(){
+	signal(SIGINT, clean_exit);
+	sprintf(client_buffer,"-1");
+	send(server_fd,client_buffer,strlen(client_buffer), 0);
+
+	return;
+
+	//runtime();
+}
 
 

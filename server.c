@@ -40,6 +40,17 @@ channel channels[MAX_CHANNELS] = {{
 	.read_messages = 0
 }};
 
+
+typedef struct next_node  next_node_t;
+
+struct next_node {
+	int channel_id;
+	next_node_t* next;
+};
+
+next_node_t *head;
+next_node_t *end;
+
 // server functions
 void clean_exit(int sig);	
 void process_buffer(char* buffer);
@@ -50,14 +61,12 @@ void next(char* id);
 void livefeed(char* id);
 void send_message(char* id, char message[BUFFER_SIZE]);
 void bye();
+void clear_old_messages(int id);
+void runtime();
 int check_id(char* id);
 
 
 int main(int argc, const char** argv){
-
-
-	// exit signal handler
-	signal(SIGINT,clean_exit);
 
 	// set port number
 	uint16_t PORT_NUMBER = 12345;
@@ -105,23 +114,13 @@ int main(int argc, const char** argv){
 
 	// send client welcome message
 	char welcome_message[BUFFER_SIZE];	
+	bzero(welcome_message, BUFFER_SIZE);
 	sprintf(welcome_message, "Welcome! Your client ID is %d", client_fd);
 	send(client_fd, welcome_message, strlen(welcome_message), 0);
 
-
-	while (1){
-
-		// clear buffers
-		bzero(server_buffer, BUFFER_SIZE*2);
-		bzero(client_buffer, BUFFER_SIZE*2);
-		
-		
-		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
-		
-		printf("\n[CLIENT %d] -------------\n", client_fd);
-		process_buffer(client_buffer);
-
-	}
+	////////////////////////////// THE WHILE LOOP WAS PREVIOUSLY HERE
+	runtime();
+	/////////////////////////////////////////////////////////////
 
 	close(server_fd);
 	close(client_fd);
@@ -228,13 +227,38 @@ void sub(char* id){
 	}
 	
 	channels[id_int].subscribed = true;
+	clear_old_messages(id_int);
 	sprintf(server_buffer, "Subscribed to channel %s.", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);	
 }	
 
 
 void unsub(char* id){
-	// TODO
+
+	bzero(server_buffer, sizeof(server_buffer));
+	// if id is not provided, send error message
+	if (id == NULL){
+		strncpy(server_buffer, "Please provide a channel ID.", sizeof(server_buffer));
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		return;
+	}
+
+	// returns id as integer if valid, or -1 if invalid
+	int id_int = check_id(id);	
+	// if invalid, discontinue
+	if (id_int == -1) { return; }
+
+	// if channel is already subscribed to, unsub
+	if (channels[id_int].subscribed == true){
+		channels[id_int].subscribed = false;
+		sprintf(server_buffer, "Unsubscribed to channel %s.", id);
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		return;
+	}
+	
+	sprintf(server_buffer, "Already unsubscribed to channel %s", id);
+	send(client_fd, server_buffer, BUFFER_SIZE, 0);
+
 }
 
 
@@ -244,6 +268,14 @@ void next(char* id){
 
 
 	if (id == NULL){
+
+
+		next_node_t* temp = head;
+
+		for (; temp != NULL; temp=temp->next){
+			printf("%d\n",temp->channel_id);
+		}
+
 		strncpy(server_buffer, "TODO: parameterless NEXT.", sizeof(server_buffer));
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		return;
@@ -277,13 +309,76 @@ void next(char* id){
 
 	send(client_fd, server_buffer, BUFFER_SIZE, 0); // send message
 	
-
-		
+	next_node_t* temp = head;
+	next_node_t* prev = head;
+	for (; temp != NULL; temp=temp->next){
+		if (temp->channel_id == id_int){
+			if (temp == end){
+				end = prev;
+			}
+			if (temp == head){
+				head = head->next;
+				free(temp);
+			} 
+			else {
+				prev->next = temp->next;
+				free(temp);	
+			}
+	
+		}
+		prev = temp;
+	}	
 }
 
 
 void livefeed(char* id){
-	// TODO
+	// Here we loop through the NEXT command for the specified channel
+	// Once all the messages are sent, the loop will continue, and only execute ...
+	// NEXT when the number of unread messages is > than 0
+
+	if (id == NULL){
+		strncpy(server_buffer, "TODO: parameterless LIVEFEED.", sizeof(server_buffer));
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		return;
+	}
+
+	// returns id as integer if valid, or -1 if invalid
+	int id_int = check_id(id);	
+	// if invalid, discontinue
+	if (id_int == -1) { 
+		
+		// Sends livestream disabling sequence to client
+		sprintf(server_buffer, " \n\n");
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		return; }
+
+	if (channels[id_int].subscribed == false){
+		sprintf(server_buffer, "Not subscribed to channel %s.", id);
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+
+		// Sends livestream disabling sequence to client
+		sprintf(server_buffer, " \n\n");
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		return;
+	}
+
+	while (strcmp(client_buffer,"-1") != 0)
+	{
+		bzero(client_buffer, BUFFER_SIZE*2);
+		if (channels[id_int].unread_messages > 0){
+			next(id);
+		}else{
+			sprintf(server_buffer," \n");
+			send(client_fd,server_buffer, BUFFER_SIZE,0);
+			printf("All messages sent\n");
+		}
+		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
+	}
+
+	// Will return client to normal operation
+	sprintf(server_buffer," \n\n");
+	send(client_fd,server_buffer, BUFFER_SIZE,0);
+	
 }
 
 
@@ -299,25 +394,30 @@ void send_message(char* id, char message[BUFFER_SIZE]){
 	// store message at index of messages, char. by char.	
 	bzero(channels[id_int].messages[index], BUFFER_SIZE);
 	sprintf(channels[id_int].messages[index], "%s", message);
-	
-	// increment counts
-	channels[id_int].total_messages += 1;
-	channels[id_int].unread_messages += 1;
-	
+
 	// inform client the message has been sent
 	bzero(server_buffer, sizeof(server_buffer));
 	sprintf(server_buffer, "Message sent to channel %s.", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);
-/*	
-channel channels[MAX_CHANNELS] = {{
-	.subscribed = false,
-	.total_messages = 0,
-	.unread_messages = 0,
-	.read_messages = 0
-}};*/
 
-
-
+		
+	// increment counts
+	channels[id_int].total_messages += 1;
+	channels[id_int].unread_messages += 1;
+	
+	if (channels[id_int].subscribed == true){
+		next_node_t * new_next = (next_node_t*)malloc(sizeof(next_node_t));
+		new_next->channel_id = id_int;		
+		new_next->next = NULL;
+		if (end != NULL){
+			end->next = new_next;
+		}
+		else{
+			head = new_next; 
+		}
+		end = new_next;
+	}	
+	
 }
 
 
@@ -344,9 +444,40 @@ int check_id(char* id){
 
 }
 
+void clear_old_messages(int id) {
+	// This function is used inside SUB to clear any prehistoric messages associated with the channels
+	// The NEXT command is not suposed to return any messages sent before subscription
+
+	channels[id].read_messages = 0;
+	channels[id].unread_messages = 0;
+
+	// Cleaning away historical messages
+	for (int i=0; i<MAX_MESSAGES;i++){
+		bzero(channels[id].messages[i], sizeof(channels[id].messages[i]));
+	}
+
+}
 
 
+void runtime(){
 
+	// exit signal handler
+	signal(SIGINT,clean_exit);
+
+	while (1){
+
+		// clear buffers
+		bzero(server_buffer, BUFFER_SIZE*2);
+		bzero(client_buffer, BUFFER_SIZE*2);
+		
+		
+		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
+		
+		printf("\n[CLIENT %d] -------------\n", client_fd);
+		process_buffer(client_buffer);
+
+	}
+}
 
 
 
