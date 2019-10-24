@@ -321,7 +321,7 @@ void next(char* id){
 	// if none unread, message is empty string of index awaiting SEND
 
 	// load unread message into server buffer
-	sprintf(server_buffer, "%s", channels[id_int].messages[index]);
+	sprintf(server_buffer, "%d: %s", id_int, channels[id_int].messages[index]);
 	
 	// adjust counts if index is not for empty string awaiting SEND
 	if (index != channels[id_int].total_messages){
