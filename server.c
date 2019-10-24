@@ -76,6 +76,9 @@ void clean_exit(int sig);
 
 int main(int argc, const char** argv){
 
+	// exit signal handler
+	signal(SIGINT,clean_exit);
+	
 	// set port number
 	uint16_t PORT_NUMBER = 12345;
 	if (argc == 2){ PORT_NUMBER = atoi(argv[1]); }
@@ -136,8 +139,6 @@ void connect_client(){
 
 void runtime(){
 
-	// exit signal handler
-	signal(SIGINT,clean_exit);
 
 	while (1){
 
@@ -147,6 +148,12 @@ void runtime(){
 		
 		
 		recv(client_fd, client_buffer, sizeof(client_buffer), 0); // receive client message
+		
+		// client has ungracefully disconnected	
+		if (strlen(client_buffer) == 0) {
+			bye();
+			continue;
+		}
 		
 		printf("\n[CLIENT %d] -------------\n", client_fd);
 		process_buffer(client_buffer);
@@ -410,6 +417,13 @@ void livefeed(char* id){
 			//printf("All messages sent\n");
 		}
 		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
+	
+
+		// client has ungracefully disconnected
+		if (strlen(client_buffer) == 0) {
+			bye();
+			return;		
+		}
 	}
 
 	// Will return client to normal operation
@@ -464,7 +478,7 @@ void bye(){
 		channels[i].unread_messages = 0;
 		channels[i].read_messages = 0;
 	}
-	printf("bye\n");
+	printf("Client %d has disconnected.\n", client_fd);
 	close(client_fd);
 	connect_client();
 }

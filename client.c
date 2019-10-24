@@ -90,11 +90,19 @@ void runtime(){
 	
 		printf("\nInput: ");
 		
-		// message from user input
+		// attempt to store user input
 		char* check = fgets(client_buffer, sizeof(client_buffer), stdin); 
-		if (check == NULL || strlen(check) == 1){
-			continue; // error or only newline
-		 }
+
+		// error or EOF (ungraceful exit)
+		if (check == NULL){
+			send(server_fd, "BYE", sizeof(client_buffer), 0);
+			exit(1);
+		}
+
+		// only newline
+		if (strcmp(client_buffer, "\n") == 0){
+			continue;
+		}
 		
 		// remove newline char
 		client_buffer[strlen(client_buffer) - 1] = 0;	
