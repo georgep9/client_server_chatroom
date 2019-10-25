@@ -376,12 +376,44 @@ void livefeed(char* id){
 	// Once all the messages are sent, the loop will continue, and only execute ...
 	// NEXT when the number of unread messages is > than 0
 
+	// parameterless LIVEFEED
 	if (id == NULL){
-		/*
-			strncpy(server_buffer, "TODO: parameterless LIVEFEED.", sizeof(server_buffer));
+	
+		if (subscriptions == 0) {
+			sprintf(server_buffer, "Not subscribed to any channels.");
 			send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		*/
-		livefeed_all();
+			bzero(server_buffer, sizeof(server_buffer));
+			sprintf(server_buffer, "-1");
+			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		}
+	
+		bzero(client_buffer, sizeof(client_buffer));
+		bzero(server_buffer, sizeof(server_buffer));
+		while(strcmp(client_buffer, "-1") != 0){
+			if (head != NULL){
+				next(NULL);
+			}
+			else {
+				bzero(server_buffer, sizeof(server_buffer));
+				sprintf(server_buffer, " \n");
+				send(client_fd, server_buffer, BUFFER_SIZE, 0);
+			}
+			bzero(client_buffer, sizeof(client_buffer));
+			recv(client_fd, client_buffer, sizeof(client_buffer), 0);
+		
+			// if client has ungracefully disconnected
+			if (strlen(client_buffer) == 0) {
+				bye();
+				return;		
+			}
+						
+		}	
+		
+		// will return client to normal operation
+		bzero(server_buffer, sizeof(server_buffer));
+		sprintf(server_buffer,"-1");
+		send(client_fd,server_buffer, BUFFER_SIZE,0);
+	
 		return;
 	}
 
@@ -391,7 +423,7 @@ void livefeed(char* id){
 	if (id_int == -1) { 
 		
 		// Sends livestream disabling sequence to client
-		sprintf(server_buffer, " \n\n");
+		sprintf(server_buffer, "-1");
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		return; 
 	}
@@ -401,7 +433,7 @@ void livefeed(char* id){
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 
 		// Sends livestream disabling sequence to client
-		sprintf(server_buffer, " \n\n");
+		sprintf(server_buffer, "-1");
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		return;
 	}
@@ -427,7 +459,7 @@ void livefeed(char* id){
 	}
 
 	// Will return client to normal operation
-	sprintf(server_buffer," \n\n");
+	sprintf(server_buffer,"-1");
 	send(client_fd,server_buffer, BUFFER_SIZE,0);
 	
 }
@@ -514,43 +546,6 @@ void clear_old_messages(int id) {
 		bzero(channels[id].messages[i], sizeof(channels[id].messages[i]));
 	}
 
-}
-
-
-
-void livefeed_all(){
-	int id_int =0;
-	printf("Want a livefeed of all channels?\n");
-	while (strcmp(client_buffer,"-1") != 0)
-	{
-		printf("RUNNING!\n");
-		bzero(client_buffer, BUFFER_SIZE*2);
-
-		if (channels[id_int].subscribed == true){
-			printf("Looking at channel %d. \n", id_int);
-			if (channels[id_int].unread_messages > 0){
-				next((char *) &id_int);
-			}else{
-				id_int++;
-				sprintf(server_buffer," \n");
-				send(client_fd,server_buffer, BUFFER_SIZE,0);
-				//printf("All messages sent\n");
-			}
-		}else{
-			id_int++;
-			
-		}
-
-		if (id_int > 255){
-			id_int = 0;
-		}		
-		printf("Stuck here\n");
-		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
-	}
-
-	// Will return client to normal operation
-	sprintf(server_buffer," \n\n");
-	send(client_fd,server_buffer, BUFFER_SIZE,0);
 }
 
 

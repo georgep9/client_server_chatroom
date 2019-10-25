@@ -172,14 +172,16 @@ void send_prompt(){
 void livefeed_prompt(){
 	signal(SIGINT,end_feed);
 
-	while (strcmp(server_buffer," \n\n") != 0){
+	bzero(server_buffer,sizeof(server_buffer));
+	
+	while (strcmp(server_buffer,"-1") != 0){
 
 		bzero(server_buffer, sizeof(server_buffer));
 		bzero(client_buffer, sizeof(client_buffer));
 
 		recv(server_fd, server_buffer, BUFFER_SIZE, 0);
 		
-		if (strcmp(server_buffer," \n") != 0 && strcmp(server_buffer," \n\n") != 0 ){
+		if (strcmp(server_buffer," \n") != 0 && strcmp(server_buffer,"-1") != 0 ){
 			printf("%s\n", server_buffer);
 		}
 
@@ -187,6 +189,8 @@ void livefeed_prompt(){
 		sprintf(client_buffer," \n");
 		send(server_fd, client_buffer, strlen(client_buffer), 0);
 	}
+
+	signal(SIGINT, sigint_exit);
 	
 }
 
@@ -198,11 +202,11 @@ void bye(){
 
 
 void end_feed(){
-	signal(SIGINT, sigint_exit);
+	bzero(client_buffer, sizeof(client_buffer));
 	sprintf(client_buffer,"-1");
 	send(server_fd,client_buffer,strlen(client_buffer), 0);
 
-	return;
+	
 
 	//runtime();
 }
