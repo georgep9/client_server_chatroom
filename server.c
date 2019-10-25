@@ -377,51 +377,9 @@ void livefeed(char* id){
 	// NEXT when the number of unread messages is > than 0
 
 	// parameterless LIVEFEED
-	if (subscriptions == 0){
-		// will return client to normal operation
-		bzero(server_buffer, sizeof(server_buffer));
-		sprintf(server_buffer,"-1");
-		send(client_fd,server_buffer, BUFFER_SIZE,0);
-		return;
-	}
+	
 	if (id == NULL){
-	
-		if (subscriptions == 0) {
-			sprintf(server_buffer, "Not subscribed to any channels.");
-			send(client_fd, server_buffer, BUFFER_SIZE, 0);
-			bzero(server_buffer, sizeof(server_buffer));
-			sprintf(server_buffer, "-1");
-			send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		}
-	
-		bzero(client_buffer, sizeof(client_buffer));
-		bzero(server_buffer, sizeof(server_buffer));
-		while(strcmp(client_buffer, "-1") != 0){
-			if (head != NULL){
-				next(NULL);
-			}
-			else {
-				printf("stuck here\n");
-				bzero(server_buffer, sizeof(server_buffer));
-				sprintf(server_buffer, " \n");
-				send(client_fd, server_buffer, BUFFER_SIZE, 0);
-			}
-			bzero(client_buffer, sizeof(client_buffer));
-			recv(client_fd, client_buffer, sizeof(client_buffer), 0);
-		
-			// if client has ungracefully disconnected
-			if (strlen(client_buffer) == 0) {
-				bye();
-				return;		
-			}
-						
-		}	
-		
-		// will return client to normal operation
-		bzero(server_buffer, sizeof(server_buffer));
-		sprintf(server_buffer,"-1");
-		send(client_fd,server_buffer, BUFFER_SIZE,0);
-	
+		livefeed_all();
 		return;
 	}
 
@@ -467,6 +425,51 @@ void livefeed(char* id){
 	}
 
 	// Will return client to normal operation
+	bzero(server_buffer, sizeof(server_buffer));
+	sprintf(server_buffer,"-1");
+	send(client_fd,server_buffer, BUFFER_SIZE,0);
+	
+}
+
+void livefeed_all(){
+
+	bzero(client_buffer, sizeof(client_buffer));
+	bzero(server_buffer, sizeof(server_buffer));
+		
+	if (subscriptions == 0) {
+		sprintf(server_buffer, "Not subscribed to any channels.");
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		bzero(server_buffer, sizeof(server_buffer));
+		sprintf(server_buffer, "-1");
+		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		// flags from client closing livefeed
+		recv(client_fd, client_buffer, BUFFER_SIZE, 0);
+		recv(client_fd, client_buffer, BUFFER_SIZE, 0);
+		return;
+	}
+	
+	while(strcmp(client_buffer, "-1") != 0){
+		if (head != NULL){
+			next(NULL);
+		}
+		else {
+			bzero(server_buffer, sizeof(server_buffer));
+			sprintf(server_buffer, " \n");
+			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		}
+		bzero(client_buffer, sizeof(client_buffer));
+		recv(client_fd, client_buffer, BUFFER_SIZE, 0);
+		
+		// if client has ungracefully disconnected
+		if (strlen(client_buffer) == 0) {
+			bye();
+			return;		
+		}
+					
+	}	
+		
+	// will return client to normal operation
+	bzero(server_buffer, sizeof(server_buffer));
 	sprintf(server_buffer,"-1");
 	send(client_fd,server_buffer, BUFFER_SIZE,0);
 	

@@ -187,7 +187,7 @@ void livefeed_prompt(){
 
 		// send to server blank messages because it is expecting a terminating -1 (which is sent after SIGINT is flagged)
 		sprintf(client_buffer," \n");
-		send(server_fd, client_buffer, strlen(client_buffer), 0);
+		send(server_fd, client_buffer, BUFFER_SIZE, 0);
 	}
 
 	signal(SIGINT, sigint_exit);
@@ -204,7 +204,7 @@ void bye(){
 void end_feed(){
 	bzero(client_buffer, sizeof(client_buffer));
 	sprintf(client_buffer,"-1");
-	send(server_fd,client_buffer,strlen(client_buffer), 0);
+	send(server_fd,client_buffer,BUFFER_SIZE, 0);
 
 	
 
