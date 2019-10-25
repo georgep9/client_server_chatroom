@@ -377,6 +377,13 @@ void livefeed(char* id){
 	// NEXT when the number of unread messages is > than 0
 
 	// parameterless LIVEFEED
+	if (subscriptions == 0){
+		// will return client to normal operation
+		bzero(server_buffer, sizeof(server_buffer));
+		sprintf(server_buffer,"-1");
+		send(client_fd,server_buffer, BUFFER_SIZE,0);
+		return;
+	}
 	if (id == NULL){
 	
 		if (subscriptions == 0) {
@@ -394,6 +401,7 @@ void livefeed(char* id){
 				next(NULL);
 			}
 			else {
+				printf("stuck here\n");
 				bzero(server_buffer, sizeof(server_buffer));
 				sprintf(server_buffer, " \n");
 				send(client_fd, server_buffer, BUFFER_SIZE, 0);
