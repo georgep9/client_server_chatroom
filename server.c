@@ -283,6 +283,39 @@ void unsub(char* id){
 
 	subscriptions -= 1;
 
+	// remove sent messages of unsubscribed channel from linked list
+	next_node_t* curr = head;
+	next_node_t* prev = curr;
+	next_node_t* temp;
+	for (; curr!=NULL; curr=curr->next){
+		if (curr->channel_id == id_int){
+			if (curr == head){
+				if (curr != end){
+					temp = curr;
+					head = head->next;
+					free(temp);
+				} else {
+					free(curr);
+					head = NULL;
+					end = NULL;
+					break;
+				}
+			}
+			else if (curr == end){
+				end = prev;
+				free(curr);
+				break;
+			}
+			else {
+				temp = curr;
+				prev->next = curr->next;
+				free(temp);
+				curr = prev;
+			}
+		}
+		prev = curr;
+	}
+
 }
 
 
