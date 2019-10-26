@@ -8,33 +8,43 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <stdbool.h>
 
 #define BUFFER_SIZE 1024
 
 int server_fd;
 struct sockaddr_in server_addr;
 
+int parallel_fd; // parallel socket for handling NEXT and CHANNELS
+
 // buffer for receiving messages from server
 char server_buffer[BUFFER_SIZE*2];
 
 // buffer for sending messages
 char client_buffer[BUFFER_SIZE*2];
-	
+
+// buffers used for parallel socket (NEXT and LIVEFEED)
+char pclient_buffer[BUFFER_SIZE];
+char pserver_buffer[BUFFER_SIZE];
 
 void connect_server(char **argv);
-void runtime();
+void* runtime(void* p);
 void process_commands(char* buffer);
 void channels_prompt();
 void sub_unsub_prompt();
 void* next_prompt(void* p);
 void send_prompt();
-void livefeed_prompt();
+void* livefeed_prompt(void* p);
 void bye();
 void end_feed();
 void sigint_exit(int sig);
 
+pthread_t next_thread;
+pthread_t livefeed_thread;
+bool parallel_is_running = false;
+
 int main(int argc, char **argv){
-	signal(SIGINT, sigint_exit);
+	signal(SIGINT, bye);
 
 	// expect 2 input arguments
 	if (argc < 3) {
@@ -45,10 +55,11 @@ int main(int argc, char **argv){
 	///////////////////////////////////////////////////////////
 	connect_server(argv);
 	////////////////////////////// THE WHILE LOOP WAS PREVIOUSLY HERE
-	runtime(); 
+	runtime(NULL); 
 	/////////////////////////////////////////////////////////////
 
 	close(server_fd);
+	close(parallel_fd);
 }
 
 void connect_server(char **argv){
@@ -74,6 +85,17 @@ void connect_server(char **argv){
 		exit(1);
 	}
 
+	parallel_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (parallel_fd == -1){
+		perror("Failed to create parallel socket\n");
+		exit(1);
+	}
+	if (connect(parallel_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1){
+		perror("Failed to connect parallel socket\n");
+		exit(1); 
+	}
+
+
 	// read and print welcome message from server
 	char welcome_message[BUFFER_SIZE];
 	read(server_fd, welcome_message, BUFFER_SIZE);
@@ -82,28 +104,25 @@ void connect_server(char **argv){
 	
 }
 
-void runtime(){
+void* runtime(void* p){
 	while (1){
 
 		// clear buffers
 		bzero(server_buffer, sizeof(server_buffer));
 		bzero(client_buffer, sizeof(client_buffer));
-	
-		printf("\nInput: ");
 		
+		printf("\n");
+
 		// attempt to store user input
 		char* check = fgets(client_buffer, sizeof(client_buffer), stdin); 
 
 		// error or EOF (ungraceful exit)
 		if (check == NULL){
-			send(server_fd, "BYE", sizeof(client_buffer), 0);
-			exit(1);
+			bye();
 		}
 
 		// only newline
-		if (strcmp(client_buffer, "\n") == 0){
-			continue;
-		}
+		if (strcmp(client_buffer, "\n") == 0){ continue; }
 		
 		// remove newline char
 		client_buffer[strlen(client_buffer) - 1] = 0;	
@@ -112,31 +131,46 @@ void runtime(){
 		process_commands(client_buffer);
 	
 	}
+	return NULL;
 }
 
 void process_commands(char* buffer){
+
+
 	char* buffer_cpy = strdup(buffer);
 	char* command = strtok(buffer_cpy, " ");
-
 	
-	
-	if (strcmp(command, "CHANNELS") == 0) { 
-		channels_prompt(); 
-	}
+	if (strcmp(command, "CHANNELS") == 0) { channels_prompt(); }
 	else if (strcmp(command, "SUB") == 0 || strcmp(command, "UNSUB") == 0){
 		sub_unsub_prompt();
 	}
-	else if (strcmp(command, "NEXT") == 0){
-		pthread_t next_thread;
-		pthread_create(&next_thread, NULL, next_prompt, NULL); 
-		pthread_join(next_thread, NULL);
-	}
-	else if (strcmp(command, "LIVEFEED") == 0) { livefeed_prompt(); } 
 	else if (strcmp(command, "SEND") == 0) { send_prompt(); } 
-	else if (strcmp(command, "BYE") == 0){ bye(); }
-	else{
-		printf("Invalid command or TODO\n");
+	else if (strcmp(command, "NEXT") == 0) {
+		if (parallel_is_running == true){
+			printf("Outstanding NEXT or LIVEFEED commands have been issued.\n");
+		}
+		else {
+			pthread_create(&next_thread, NULL, next_prompt, NULL);
+			parallel_is_running = true;
+		}
 	}
+	else if (strcmp(command, "LIVEFEED") == 0){
+		if (parallel_is_running == true){
+			printf("Outstanding NEXT or LIVEFEED commands have been issued.\n");
+		}
+		else {
+			pthread_create(&livefeed_thread, NULL, livefeed_prompt, NULL);
+			parallel_is_running = true;
+		}
+	}
+	else if (strcmp(command, "BYE") == 0){ bye(); }
+	else if (strcmp(command, "STOP") == 0) {
+		pthread_cancel(next_thread);
+		pthread_cancel(livefeed_thread);
+		parallel_is_running = false;
+		signal(SIGINT, bye);
+	}
+	else { printf("Invalid command.\n"); }
 
 }
 
@@ -163,20 +197,12 @@ void sub_unsub_prompt(){
 
 void* next_prompt(void* p){
 
-	int parallel_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (parallel_fd == -1){
-		perror("Failed to create parallel socket\n");
-		exit(1);
-	}
+	bzero(pserver_buffer, sizeof(pserver_buffer));
+	recv(parallel_fd, pserver_buffer, BUFFER_SIZE, 0);
+	printf("%s\n", pserver_buffer);
 	
-	if (connect(parallel_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1){
-		perror("Failed to connect parallel socket\n");
-		exit(1); 
-	}
-	bzero(server_buffer, sizeof(server_buffer));
-	recv(parallel_fd, server_buffer, BUFFER_SIZE, 0);
-	printf("%s\n", server_buffer);
-	close(parallel_fd);
+	parallel_is_running = false;
+	
 	return NULL;
 }	
 
@@ -186,33 +212,42 @@ void send_prompt(){
 	printf("%s\n", server_buffer);
 }
 
-void livefeed_prompt(){
+void* livefeed_prompt(void *p){
+	
 	signal(SIGINT,end_feed);
 
-	bzero(server_buffer,sizeof(server_buffer));
-	
-	while (strcmp(server_buffer,"-1") != 0){
+	bzero(pserver_buffer,sizeof(pserver_buffer));
 
-		bzero(server_buffer, sizeof(server_buffer));
-		bzero(client_buffer, sizeof(client_buffer));
-
-		recv(server_fd, server_buffer, BUFFER_SIZE, 0);
+	// if client exits livefeed, server will receive a "-1" and in
+	// response will send "-1" back to indicate livefeed is over
+	while (strcmp(pserver_buffer,"-1") != 0){
 		
-		if (strcmp(server_buffer," \n") != 0 && strcmp(server_buffer,"-1") != 0 ){
-			printf("%s\n", server_buffer);
-		}
+		// message to display or idling empty string
+		bzero(pserver_buffer,sizeof(pserver_buffer));
+		recv(parallel_fd, pserver_buffer, BUFFER_SIZE, 0);
 
-		// send to server blank messages because it is expecting a terminating -1 (which is sent after SIGINT is flagged)
-		sprintf(client_buffer," \n");
-		send(server_fd, client_buffer, BUFFER_SIZE, 0);
+		// if not idle empty string, or exit flag, display message
+		if (strcmp(pserver_buffer," \n") != 0 && strcmp(pserver_buffer,"-1") != 0 ){
+			printf("%s\n", pserver_buffer);
+		}
+		
+		// send empty string back to server (livefeed continues)
+		bzero(pclient_buffer,sizeof(pclient_buffer));
+		sprintf(pclient_buffer," \n");
+		send(parallel_fd, pclient_buffer, BUFFER_SIZE, 0);
+	
 	}
 
-	signal(SIGINT, sigint_exit);
-	
+	signal(SIGINT, bye);
+
+	parallel_is_running = false;
+		
+	return NULL;
 }
 
 void bye(){
 	close(server_fd);
+	close(parallel_fd);
 	exit(1);
 }
 
@@ -221,7 +256,7 @@ void bye(){
 void end_feed(){
 	bzero(client_buffer, sizeof(client_buffer));
 	sprintf(client_buffer,"-1");
-	send(server_fd,client_buffer,BUFFER_SIZE, 0);
+	send(parallel_fd,client_buffer,BUFFER_SIZE, 0);
 
 	
 

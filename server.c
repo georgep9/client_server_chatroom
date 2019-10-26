@@ -19,12 +19,19 @@ int server_fd;
 int client_fd;
 int parallel_fd; // client socket for NEXT and LIVEFEED
 
+// for NEXT and LIVEFEED threads
+pthread_t next_thread;
+pthread_t livefeed_thread;
 
 // buffer for receiving messages from client
 char client_buffer[BUFFER_SIZE*2];
 	
 // buffer for sending messages
 char server_buffer[BUFFER_SIZE*2];
+
+// buffer recv. and sending data via parallel socket
+// for NEXT and LIVEFEED
+char parallel_buffer[BUFFER_SIZE];
 
 // The Server address struct and its length
 struct sockaddr_in addr;
@@ -61,13 +68,13 @@ next_node_t *end;
 
 // server functions
 void connect_client();
-void* runtime(void* p);
+void runtime();
 void process_buffer(char* buffer);
 void view_channels();
 void sub(char* id);
 void unsub(char* id);
 void* next(void* idp);
-void livefeed(char* id);
+void* livefeed(void* id);
 void send_message(char* id, char message[BUFFER_SIZE]);
 void bye();
 void clear_old_messages(int id);
@@ -75,6 +82,9 @@ void livefeed_all();
 int check_id(char* id);
 
 void clean_exit(int sig);	
+
+ // flag for outstanding NEXT or LIVEFEED
+bool parallel_is_running = false;
 
 
 int main(int argc, const char** argv){
@@ -105,12 +115,11 @@ int main(int argc, const char** argv){
 	}
 
 	connect_client();
-	////////////////////////////// THE WHILE LOOP WAS PREVIOUSLY HERE
-	runtime(NULL);
-	/////////////////////////////////////////////////////////////
+	runtime();
 
 	close(server_fd);
 	close(client_fd);
+	close(parallel_fd);
 
 }
 
@@ -130,6 +139,12 @@ void connect_client(){
 	if (client_fd == -1){
 		perror("accept");
 	}
+
+	parallel_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
+	if (parallel_fd == -1){
+		perror("Failed to accept parallel connection from client.\n");
+	}
+	
 	printf("Connection made! Client ID: %d\n\n", client_fd);
 
 	// send client welcome message
@@ -140,15 +155,13 @@ void connect_client(){
 
 }
 
-void* runtime(void* p){
-
+void runtime(){
 
 	while (1){
 
 		// clear buffers
 		bzero(server_buffer, sizeof(server_buffer));
 		bzero(client_buffer, sizeof(client_buffer));
-		
 		
 		recv(client_fd, client_buffer, sizeof(client_buffer), 0); // receive client message
 		
@@ -158,15 +171,15 @@ void* runtime(void* p){
 			continue;
 		}
 		
-		printf("\n[CLIENT %d] -------------\n", client_fd);
 		process_buffer(client_buffer);
 
 	}
 
-	return NULL;
 }
 
 void process_buffer(char* buffer){
+
+	printf("[CLIENT 4]: %s\n", buffer);
 	
 	// get command string from buffer
 	char* buffer_cpy = strdup(buffer);
@@ -188,38 +201,38 @@ void process_buffer(char* buffer){
 		}	
 	}		
 		
-	// display feedback
-	char feedback[BUFFER_SIZE*2];
-	sprintf(feedback, "\nCommand: %s\nChannel ID: %s\nMessage: %s\n\n", command, id, message);
-	printf("%s", feedback);
 
 
-
-	// open parallel socket for NEXT and LIVEFEED commands
-	if (strcmp(command, "NEXT") == 0 || strcmp(command, "LIVEFEED") == 0){
-		parallel_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
-		if (parallel_fd == -1){
-			perror("accept");
-		}
-	}
 
 	// given the command string, run corresponding function 	
 	if (strcmp(command, "CHANNELS") == 0) { view_channels(); }
 	else if (strcmp(command, "SUB") == 0) { sub(id); }
 	else if (strcmp(command, "UNSUB") == 0) { unsub(id); }
 	else if (strcmp(command, "NEXT") == 0) { 
-		pthread_t next_thread;
-		pthread_t runtime_thread;
-		pthread_create(&next_thread, NULL, next,  (void *)&id);
-		pthread_create(&runtime_thread, NULL, runtime, NULL);
-		pthread_join(next_thread, NULL);
-		pthread_join(runtime_thread, NULL);
-		close(parallel_fd);
+		if (parallel_is_running == true){
+			printf("Outstanding NEXT or LIVEFEED commands have been issued.\n");
+		}
+		else {
+			pthread_create(&next_thread, NULL, next,  (void *)&id);
+		}
 	}
-	else if (strcmp(command, "LIVEFEED") == 0) { livefeed(id); }
+	else if (strcmp(command, "LIVEFEED") == 0) { 
+		if (parallel_is_running == true){
+			printf("Outstanding NEXT or LIVEFEED commands have been issued.\n");
+		}
+		else { 
+			pthread_create(&livefeed_thread, NULL, livefeed, (void*)&id);
+		}
+	}
+	
 	else if (strcmp(command, "SEND") == 0) { send_message(id, message); }
 	else if (strcmp(command, "BYE") == 0) { bye(); }
-	else { printf("Invalid command or TODO\n"); }	
+	else if (strcmp(command, "STOP") == 0) {
+		pthread_cancel(next_thread);
+		pthread_cancel(livefeed_thread);
+		parallel_is_running = false;
+		
+	}
 	
 }
 
@@ -345,14 +358,13 @@ void unsub(char* id){
 void* next(void* idp){
 
 	char* id = *((char**) idp);
-
-	bzero(server_buffer, sizeof(server_buffer));
-
+	
+	bzero(parallel_buffer, sizeof(parallel_buffer));
 
 	if (id == NULL){
 		if (subscriptions == 0){
-			sprintf(server_buffer, "Not subscribed to any channels.");
-			send(parallel_fd, server_buffer, BUFFER_SIZE, 0);
+			sprintf(parallel_buffer, "Not subscribed to any channels.");
+			send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
 		}
 		else if (head != NULL){
 			char* head_id = (char*) malloc(3*sizeof(char));
@@ -362,38 +374,40 @@ void* next(void* idp){
 			free(head_id);
 		}
 		else {
-			sprintf(server_buffer, " ");
-			send(parallel_fd, server_buffer, BUFFER_SIZE, 0); 
+			sprintf(parallel_buffer, " ");
+			send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0); 
 		}	
+
+		parallel_is_running = false;
 		
 		return NULL;
 	}
-
 
 	// returns id as integer if valid, or -1 if invalid
 	int id_int = check_id(id);	
 	// if invalid, discontinue
 	if (id_int == -1) { return NULL; }
 
-
 	if (channels[id_int].subscribed == false){
-		sprintf(server_buffer, "Not subscribed to channel %s.", id);
-		send(parallel_fd, server_buffer, BUFFER_SIZE, 0);
+		sprintf(parallel_buffer, "Not subscribed to channel %s.", id);
+		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
 		return NULL;
 	}
 
 	if (channels[id_int].unread_messages == 0){
-		sprintf(server_buffer, " ");
-		send(parallel_fd, server_buffer, BUFFER_SIZE, 0);
+		sprintf(parallel_buffer, " ");
+		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
 		return NULL;
 	}
+
+	parallel_is_running = true;
 
 	// index of next unread message
 	int index = channels[id_int].total_messages - channels[id_int].unread_messages; 	
 	// if none unread, message is empty string of index awaiting SEND
 
 	// load unread message into server buffer
-	sprintf(server_buffer, "%d: %s", id_int, channels[id_int].messages[index]);
+	sprintf(parallel_buffer, "%d: %s", id_int, channels[id_int].messages[index]);
 	
 	// adjust counts if index is not for empty string awaiting SEND
 	if (index != channels[id_int].total_messages){
@@ -401,7 +415,7 @@ void* next(void* idp){
 		channels[id_int].unread_messages -= 1;	
 	} 
 
-	send(parallel_fd, server_buffer, BUFFER_SIZE, 0); // send message
+	send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0); // send message
 
 
 	// update linked list of channels order of sent messages	
@@ -434,112 +448,145 @@ void* next(void* idp){
 		prev = temp;
 	}
 
+	parallel_is_running = false;
+
 	return NULL;	
 }
 
 
-void livefeed(char* id){
-	// Here we loop through the NEXT command for the specified channel
-	// Once all the messages are sent, the loop will continue, and only execute ...
-	// NEXT when the number of unread messages is > than 0
+void* livefeed(void* idp){
 
 	// parameterless LIVEFEED
 	
+	bzero(parallel_buffer, BUFFER_SIZE);
+
+	char* id = *((char **) idp);
+
 	if (id == NULL){
 		livefeed_all();
-		return;
+		return NULL;
 	}
+
+	// PRECHECKS
 
 	// returns id as integer if valid, or -1 if invalid
 	int id_int = check_id(id);	
 	// if invalid, discontinue
 	if (id_int == -1) { 
 		
-		// Sends livestream disabling sequence to client
-		sprintf(server_buffer, "-1");
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		return; 
+		// send discontinue flag to client
+		sprintf(parallel_buffer, "-1");
+		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
+		return NULL;
 	}
 
 	if (channels[id_int].subscribed == false){
-		sprintf(server_buffer, "Not subscribed to channel %s.", id);
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		sprintf(parallel_buffer, "Not subscribed to channel %s.", id);
+		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
 
-		// Sends livestream disabling sequence to client
-		sprintf(server_buffer, "-1");
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		return;
+		// send discontinue flag to client
+		sprintf(parallel_buffer, "-1");
+		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
+		return NULL;
 	}
 
-	while (strcmp(client_buffer,"-1") != 0)
+
+
+	
+	
+	// Here we loop through the NEXT command for the specified channel
+	// Once all the messages are sent, the loop will continue, and only execute ...
+	// NEXT when the number of unread messages is > than 0
+	
+	while (strcmp(parallel_buffer,"-1") != 0)
 	{
-		bzero(client_buffer, BUFFER_SIZE*2);
+		parallel_is_running = true;
+
+		bzero(parallel_buffer, BUFFER_SIZE);
 		if (channels[id_int].unread_messages > 0){
-			next(id);
+			next((void*)&id);
 		}else{
-			sprintf(server_buffer," \n");
-			send(client_fd,server_buffer, BUFFER_SIZE,0);
+			sprintf(parallel_buffer," \n");
+			send(parallel_fd,parallel_buffer, BUFFER_SIZE,0);
 			//printf("All messages sent\n");
 		}
-		recv(client_fd, client_buffer, BUFFER_SIZE*2, 0); // receive client message
+		recv(parallel_fd, parallel_buffer, BUFFER_SIZE, 0); // receive client message
 	
 
 		// client has ungracefully disconnected
-		if (strlen(client_buffer) == 0) {
+		if (strlen(parallel_buffer) == 0) {
 			bye();
-			return;		
+			parallel_is_running = false;
+			return NULL;
 		}
 	}
 
 	// Will return client to normal operation
-	bzero(server_buffer, sizeof(server_buffer));
-	sprintf(server_buffer,"-1");
-	send(client_fd,server_buffer, BUFFER_SIZE,0);
-	
+	bzero(parallel_buffer, sizeof(parallel_buffer));
+	sprintf(parallel_buffer,"-1");
+	send(parallel_fd,parallel_buffer, BUFFER_SIZE,0);
+
+	parallel_is_running = false;
+
+	return NULL;	
 }
 
 void livefeed_all(){
 
-	bzero(client_buffer, sizeof(client_buffer));
-	bzero(server_buffer, sizeof(server_buffer));
-		
+	bzero(parallel_buffer, sizeof(parallel_buffer));
+
+
+	// opt client out		
 	if (subscriptions == 0) {
-		sprintf(server_buffer, "Not subscribed to any channels.");
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		bzero(server_buffer, sizeof(server_buffer));
-		sprintf(server_buffer, "-1");
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		// flags from client closing livefeed
-		recv(client_fd, client_buffer, BUFFER_SIZE, 0);
-		recv(client_fd, client_buffer, BUFFER_SIZE, 0);
+		sprintf(parallel_buffer, "Not subscribed to any channels.");
+		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
+		recv(parallel_fd, parallel_buffer, BUFFER_SIZE, 0); // empty
+		bzero(parallel_buffer, sizeof(parallel_buffer));
+		
+		sprintf(parallel_buffer, "-1"); // flag for client to exit feed
+		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
+		recv(parallel_fd, parallel_buffer, BUFFER_SIZE, 0); // empty
+		
+		parallel_is_running = false;
 		return;
 	}
-	
-	while(strcmp(client_buffer, "-1") != 0){
+
+	// while client hasn't flagged to exit livefeed	
+	while(strcmp(parallel_buffer, "-1") != 0){
+
+		parallel_is_running = true;
+
+		// send message if linked list contains messages to send 
 		if (head != NULL){
-			next(NULL);
+			char *null = NULL;
+			next((void*)&null);
 		}
-		else {
-			bzero(server_buffer, sizeof(server_buffer));
-			sprintf(server_buffer, " \n");
-			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+		else { // else, send empty string, (idling area)
+			bzero(parallel_buffer, sizeof(parallel_buffer));
+			sprintf(parallel_buffer, " \n");
+			send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
 		}
-		bzero(client_buffer, sizeof(client_buffer));
-		recv(client_fd, client_buffer, BUFFER_SIZE, 0);
+
+		// if client is still in livefeed, should receive empty string,
+		// otherwise a "-1" string  indicates the client wants to exit
+		bzero(parallel_buffer, sizeof(parallel_buffer));
+		recv(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
 		
 		// if client has ungracefully disconnected
-		if (strlen(client_buffer) == 0) {
+		if (strlen(parallel_buffer) == 0) {
 			bye();
+			parallel_is_running = false;
 			return;		
 		}
 					
 	}	
 		
-	// will return client to normal operation
-	bzero(server_buffer, sizeof(server_buffer));
-	sprintf(server_buffer,"-1");
-	send(client_fd,server_buffer, BUFFER_SIZE,0);
+	// send flag to client that livefeed is over
+	bzero(parallel_buffer, sizeof(parallel_buffer));
+	sprintf(parallel_buffer,"-1");
+	send(parallel_fd,parallel_buffer, BUFFER_SIZE,0);
 	
+	parallel_is_running = false;
 }
 
 
@@ -590,6 +637,7 @@ void bye(){
 	}
 	printf("Client %d has disconnected.\n", client_fd);
 	close(client_fd);
+	close(parallel_fd);
 	connect_client();
 }
 
@@ -639,6 +687,7 @@ void clean_exit(int signum){
 
 	close(server_fd);
 	close(client_fd);
+	close(parallel_fd);
 	exit(1);
-
 }
+
