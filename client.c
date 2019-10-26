@@ -28,14 +28,14 @@ char pclient_buffer[BUFFER_SIZE];
 char pserver_buffer[BUFFER_SIZE];
 
 void connect_server(char **argv);
-void* runtime(void* p);
+void runtime();
 void process_commands(char* buffer);
 void channels_prompt();
 void sub_unsub_prompt();
 void* next_prompt(void* p);
 void send_prompt();
 void* livefeed_prompt(void* p);
-void bye();
+void bye(int signum);
 void end_feed();
 void sigint_exit(int sig);
 
@@ -55,7 +55,7 @@ int main(int argc, char **argv){
 	///////////////////////////////////////////////////////////
 	connect_server(argv);
 	////////////////////////////// THE WHILE LOOP WAS PREVIOUSLY HERE
-	runtime(NULL); 
+	runtime(); 
 	/////////////////////////////////////////////////////////////
 
 	close(server_fd);
@@ -104,7 +104,7 @@ void connect_server(char **argv){
 	
 }
 
-void* runtime(void* p){
+void runtime(){
 	while (1){
 
 		// clear buffers
@@ -118,7 +118,7 @@ void* runtime(void* p){
 
 		// error or EOF (ungraceful exit)
 		if (check == NULL){
-			bye();
+			bye(0);
 		}
 
 		// only newline
@@ -131,7 +131,6 @@ void* runtime(void* p){
 		process_commands(client_buffer);
 	
 	}
-	return NULL;
 }
 
 void process_commands(char* buffer){
@@ -163,7 +162,7 @@ void process_commands(char* buffer){
 			parallel_is_running = true;
 		}
 	}
-	else if (strcmp(command, "BYE") == 0){ bye(); }
+	else if (strcmp(command, "BYE") == 0){ bye(0); }
 	else if (strcmp(command, "STOP") == 0) {
 		pthread_cancel(next_thread);
 		pthread_cancel(livefeed_thread);
@@ -245,7 +244,7 @@ void* livefeed_prompt(void *p){
 	return NULL;
 }
 
-void bye(){
+void bye(int signum){
 	close(server_fd);
 	close(parallel_fd);
 	exit(1);
@@ -263,15 +262,3 @@ void end_feed(){
 	//runtime();
 }
 
-// safely exit client process
-void sigint_exit(int sig){
-	
-	// TODO
-
-	bzero(client_buffer, sizeof(client_buffer));
-	strncpy(client_buffer, "BYE", BUFFER_SIZE);
-	send(server_fd, client_buffer, sizeof(client_buffer), 0);
-	
-	bye();
-}
-	
