@@ -7,10 +7,12 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 
 #define BUFFER_SIZE 1024
 
 int server_fd;
+struct sockaddr_in server_addr;
 
 // buffer for receiving messages from server
 char server_buffer[BUFFER_SIZE*2];
@@ -24,7 +26,7 @@ void runtime();
 void process_commands(char* buffer);
 void channels_prompt();
 void sub_unsub_prompt();
-void next_prompt();
+void* next_prompt(void* p);
 void send_prompt();
 void livefeed_prompt();
 void bye();
@@ -61,7 +63,6 @@ void connect_server(char **argv){
 	}
 
 	// setup struct of server address and port
-	struct sockaddr_in server_addr;
 	inet_pton(AF_INET, server_name, &server_addr.sin_addr);
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_port = htons(PORT);
@@ -116,6 +117,8 @@ void runtime(){
 void process_commands(char* buffer){
 	char* buffer_cpy = strdup(buffer);
 	char* command = strtok(buffer_cpy, " ");
+
+	
 	
 	if (strcmp(command, "CHANNELS") == 0) { 
 		channels_prompt(); 
@@ -124,7 +127,9 @@ void process_commands(char* buffer){
 		sub_unsub_prompt();
 	}
 	else if (strcmp(command, "NEXT") == 0){
-		next_prompt();
+		pthread_t next_thread;
+		pthread_create(&next_thread, NULL, next_prompt, NULL); 
+		pthread_join(next_thread, NULL);
 	}
 	else if (strcmp(command, "LIVEFEED") == 0) { livefeed_prompt(); } 
 	else if (strcmp(command, "SEND") == 0) { send_prompt(); } 
@@ -156,11 +161,23 @@ void sub_unsub_prompt(){
 	printf("%s\n", server_buffer);
 }
 
-void next_prompt(){
+void* next_prompt(void* p){
+
+	int parallel_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (parallel_fd == -1){
+		perror("Failed to create parallel socket\n");
+		exit(1);
+	}
 	
+	if (connect(parallel_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1){
+		perror("Failed to connect parallel socket\n");
+		exit(1); 
+	}
 	bzero(server_buffer, sizeof(server_buffer));
-	recv(server_fd, server_buffer, BUFFER_SIZE, 0);
+	recv(parallel_fd, server_buffer, BUFFER_SIZE, 0);
 	printf("%s\n", server_buffer);
+	close(parallel_fd);
+	return NULL;
 }	
 
 void send_prompt(){

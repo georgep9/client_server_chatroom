@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdbool.h>
 
 #define BUFFER_SIZE 1024
@@ -16,6 +17,8 @@
 // file descriptors (socket handles)
 int server_fd;
 int client_fd;
+int parallel_fd; // client socket for NEXT and LIVEFEED
+
 
 // buffer for receiving messages from client
 char client_buffer[BUFFER_SIZE*2];
@@ -58,12 +61,12 @@ next_node_t *end;
 
 // server functions
 void connect_client();
-void runtime();
+void* runtime(void* p);
 void process_buffer(char* buffer);
 void view_channels();
 void sub(char* id);
 void unsub(char* id);
-void next(char* id);
+void* next(void* idp);
 void livefeed(char* id);
 void send_message(char* id, char message[BUFFER_SIZE]);
 void bye();
@@ -103,7 +106,7 @@ int main(int argc, const char** argv){
 
 	connect_client();
 	////////////////////////////// THE WHILE LOOP WAS PREVIOUSLY HERE
-	runtime();
+	runtime(NULL);
 	/////////////////////////////////////////////////////////////
 
 	close(server_fd);
@@ -122,11 +125,11 @@ void connect_client(){
 
 	printf("Waiting for a client to connect...\n");
 
+
 	client_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
 	if (client_fd == -1){
 		perror("accept");
 	}
-
 	printf("Connection made! Client ID: %d\n\n", client_fd);
 
 	// send client welcome message
@@ -137,7 +140,7 @@ void connect_client(){
 
 }
 
-void runtime(){
+void* runtime(void* p){
 
 
 	while (1){
@@ -159,6 +162,8 @@ void runtime(){
 		process_buffer(client_buffer);
 
 	}
+
+	return NULL;
 }
 
 void process_buffer(char* buffer){
@@ -188,11 +193,29 @@ void process_buffer(char* buffer){
 	sprintf(feedback, "\nCommand: %s\nChannel ID: %s\nMessage: %s\n\n", command, id, message);
 	printf("%s", feedback);
 
+
+
+	// open parallel socket for NEXT and LIVEFEED commands
+	if (strcmp(command, "NEXT") == 0 || strcmp(command, "LIVEFEED") == 0){
+		parallel_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
+		if (parallel_fd == -1){
+			perror("accept");
+		}
+	}
+
 	// given the command string, run corresponding function 	
 	if (strcmp(command, "CHANNELS") == 0) { view_channels(); }
 	else if (strcmp(command, "SUB") == 0) { sub(id); }
 	else if (strcmp(command, "UNSUB") == 0) { unsub(id); }
-	else if (strcmp(command, "NEXT") == 0) { next(id); }
+	else if (strcmp(command, "NEXT") == 0) { 
+		pthread_t next_thread;
+		pthread_t runtime_thread;
+		pthread_create(&next_thread, NULL, next,  (void *)&id);
+		pthread_create(&runtime_thread, NULL, runtime, NULL);
+		pthread_join(next_thread, NULL);
+		pthread_join(runtime_thread, NULL);
+		close(parallel_fd);
+	}
 	else if (strcmp(command, "LIVEFEED") == 0) { livefeed(id); }
 	else if (strcmp(command, "SEND") == 0) { send_message(id, message); }
 	else if (strcmp(command, "BYE") == 0) { bye(); }
@@ -319,41 +342,50 @@ void unsub(char* id){
 }
 
 
-void next(char* id){
-		
+void* next(void* idp){
+
+	char* id = *((char**) idp);
+
 	bzero(server_buffer, sizeof(server_buffer));
 
 
 	if (id == NULL){
 		if (subscriptions == 0){
-			strncpy(server_buffer, "Not subscribed to any channels.", BUFFER_SIZE);
-			send(client_fd, server_buffer, BUFFER_SIZE, 0);
+			sprintf(server_buffer, "Not subscribed to any channels.");
+			send(parallel_fd, server_buffer, BUFFER_SIZE, 0);
 		}
 		else if (head != NULL){
-			char head_id[3];
+			char* head_id = (char*) malloc(3*sizeof(char));
 			int id_int = head->channel_id;
 			sprintf(head_id, "%d", id_int);
-			next(head_id);
+			next((void *)&head_id);
+			free(head_id);
 		}
 		else {
-			strncpy(server_buffer, " ", BUFFER_SIZE);
-			send(client_fd, server_buffer, BUFFER_SIZE, 0); 
+			sprintf(server_buffer, " ");
+			send(parallel_fd, server_buffer, BUFFER_SIZE, 0); 
 		}	
 		
-		return;
+		return NULL;
 	}
 
 
 	// returns id as integer if valid, or -1 if invalid
 	int id_int = check_id(id);	
 	// if invalid, discontinue
-	if (id_int == -1) { return; }
+	if (id_int == -1) { return NULL; }
 
 
 	if (channels[id_int].subscribed == false){
 		sprintf(server_buffer, "Not subscribed to channel %s.", id);
-		send(client_fd, server_buffer, BUFFER_SIZE, 0);
-		return;
+		send(parallel_fd, server_buffer, BUFFER_SIZE, 0);
+		return NULL;
+	}
+
+	if (channels[id_int].unread_messages == 0){
+		sprintf(server_buffer, " ");
+		send(parallel_fd, server_buffer, BUFFER_SIZE, 0);
+		return NULL;
 	}
 
 	// index of next unread message
@@ -369,7 +401,7 @@ void next(char* id){
 		channels[id_int].unread_messages -= 1;	
 	} 
 
-	send(client_fd, server_buffer, BUFFER_SIZE, 0); // send message
+	send(parallel_fd, server_buffer, BUFFER_SIZE, 0); // send message
 
 
 	// update linked list of channels order of sent messages	
@@ -400,7 +432,9 @@ void next(char* id){
 			break;
 		}
 		prev = temp;
-	}	
+	}
+
+	return NULL;	
 }
 
 
