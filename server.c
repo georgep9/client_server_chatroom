@@ -107,6 +107,11 @@ int main(int argc, const char** argv){
 		exit(1);
 	}
 
+	// option to restart old connections on same addr if server
+	// has previously been closed/killed 	
+	int one = 1;
+	setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	
 	// bind server address and port to socket
 	if (bind(server_fd, (struct sockaddr *)&addr, addrlen) == -1) {
 		fprintf(stderr, "Failed to bind socket\n");
@@ -134,12 +139,14 @@ void connect_client(){
 
 	printf("Waiting for a client to connect...\n");
 
-
+	// accept main socket connection that handles client issued commands
 	client_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
 	if (client_fd == -1){
 		perror("accept");
 	}
 
+	// accept second socket connection that handles NEXT and LIVEFEED commands
+	// in parallel with main connection
 	parallel_fd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t *)&addrlen);
 	if (parallel_fd == -1){
 		perror("Failed to accept parallel connection from client.\n");
@@ -162,8 +169,9 @@ void runtime(){
 		// clear buffers
 		bzero(server_buffer, sizeof(server_buffer));
 		bzero(client_buffer, sizeof(client_buffer));
-		
-		recv(client_fd, client_buffer, sizeof(client_buffer), 0); // receive client message
+
+		// receive client issued command		
+		recv(client_fd, client_buffer, sizeof(client_buffer), 0);
 		
 		// client has ungracefully disconnected	
 		if (strlen(client_buffer) == 0) {
@@ -171,6 +179,7 @@ void runtime(){
 			continue;
 		}
 		
+		// process received data
 		process_buffer(client_buffer);
 
 	}
@@ -179,6 +188,7 @@ void runtime(){
 
 void process_buffer(char* buffer){
 
+	// displayed received data
 	printf("[CLIENT 4]: %s\n", buffer);
 	
 	// get command string from buffer
@@ -236,7 +246,7 @@ void process_buffer(char* buffer){
 	
 }
 
-
+// displays information of subscribed channels
 void view_channels(){
 
 	// send channel information if subscribed	
@@ -256,9 +266,9 @@ void view_channels(){
 }
 
 
+// subscribe to a channel
 void sub(char* id){
 
-	
 	bzero(server_buffer, sizeof(server_buffer));
 	// if id is not provided, send error message
 	if (id == NULL){
@@ -278,18 +288,22 @@ void sub(char* id){
 		send(client_fd, server_buffer, BUFFER_SIZE, 0);
 		return;
 	}
+
 	
+	subscriptions += 1; // global counter of subscriptions ammount
+	
+	// subscribe to channel and information client of subscription	
 	channels[id_int].subscribed = true;
-	clear_old_messages(id_int);
+	clear_old_messages(id_int); // clear old messages data prior sub
 	sprintf(server_buffer, "Subscribed to channel %s.", id);
 	send(client_fd, server_buffer, BUFFER_SIZE, 0);	
 
-	subscriptions += 1;
 
 
 }	
 
 
+// unsubscribe from a channel
 void unsub(char* id){
 
 
@@ -313,13 +327,8 @@ void unsub(char* id){
 		return;
 	}
 	
-	channels[id_int].subscribed = false;
-	sprintf(server_buffer, "Unsubscribed to channel %s", id);
-	send(client_fd, server_buffer, BUFFER_SIZE, 0);
-
-	subscriptions -= 1;
-
-	// remove sent messages of unsubscribed channel from linked list
+	// traverse through linked list of unread messages and remove 
+	// nodes of channel id the client is unsubscribing from
 	next_node_t* curr = head;
 	next_node_t* prev = curr;
 	next_node_t* temp;
@@ -352,6 +361,16 @@ void unsub(char* id){
 		prev = curr;
 	}
 
+	
+	subscriptions -= 1; // update global counter of subscriptions amount
+
+	// unsubscribe and inform client
+	channels[id_int].subscribed = false;
+	sprintf(server_buffer, "Unsubscribed to channel %s", id);
+	send(client_fd, server_buffer, BUFFER_SIZE, 0);
+
+
+
 }
 
 
@@ -361,6 +380,8 @@ void* next(void* idp){
 	
 	bzero(parallel_buffer, sizeof(parallel_buffer));
 
+	// if id is not provided, get id from head of linked list and 
+	// parse into next(<id>)
 	if (id == NULL){
 		if (subscriptions == 0){
 			sprintf(parallel_buffer, "Not subscribed to any channels.");
@@ -388,12 +409,14 @@ void* next(void* idp){
 	// if invalid, discontinue
 	if (id_int == -1) { return NULL; }
 
+	// if not subscribed, inform
 	if (channels[id_int].subscribed == false){
 		sprintf(parallel_buffer, "Not subscribed to channel %s.", id);
 		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
 		return NULL;
 	}
 
+	// if channel has no unread messages, display nothing 
 	if (channels[id_int].unread_messages == 0){
 		sprintf(parallel_buffer, " ");
 		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
@@ -418,7 +441,8 @@ void* next(void* idp){
 	send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0); // send message
 
 
-	// update linked list of channels order of sent messages	
+	// traverse through linked list of unread messages and remove
+	// first occurance of message of provided id
 	next_node_t* temp = head;
 	next_node_t* prev = head;
 	for (; temp != NULL; temp=temp->next){
@@ -456,12 +480,12 @@ void* next(void* idp){
 
 void* livefeed(void* idp){
 
-	// parameterless LIVEFEED
-	
 	bzero(parallel_buffer, BUFFER_SIZE);
 
+	
 	char* id = *((char **) idp);
 
+	// parameterless LIVEFEED
 	if (id == NULL){
 		livefeed_all();
 		return NULL;
@@ -488,11 +512,7 @@ void* livefeed(void* idp){
 		sprintf(parallel_buffer, "-1");
 		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
 		return NULL;
-	}
-
-
-
-	
+	}	
 	
 	// Here we loop through the NEXT command for the specified channel
 	// Once all the messages are sent, the loop will continue, and only execute ...
@@ -536,7 +556,7 @@ void livefeed_all(){
 	bzero(parallel_buffer, sizeof(parallel_buffer));
 
 
-	// opt client out		
+	// no subscriptions		
 	if (subscriptions == 0) {
 		sprintf(parallel_buffer, "Not subscribed to any channels.");
 		send(parallel_fd, parallel_buffer, BUFFER_SIZE, 0);
@@ -603,16 +623,11 @@ void send_message(char* id, char message[BUFFER_SIZE]){
 	bzero(channels[id_int].messages[index], BUFFER_SIZE);
 	sprintf(channels[id_int].messages[index], "%s", message);
 
-	// inform client the message has been sent
-	bzero(server_buffer, sizeof(server_buffer));
-	sprintf(server_buffer, "Message sent to channel %s.", id);
-	send(client_fd, server_buffer, BUFFER_SIZE, 0);
-
-		
 	// increment counts
 	channels[id_int].total_messages += 1;
 	channels[id_int].unread_messages += 1;
 	
+	// add message to end of linked list if subscribed to channel	
 	if (channels[id_int].subscribed == true){
 		next_node_t * new_next = (next_node_t*)malloc(sizeof(next_node_t));
 		new_next->channel_id = id_int;		
@@ -624,17 +639,36 @@ void send_message(char* id, char message[BUFFER_SIZE]){
 			head = new_next; 
 		}
 		end = new_next;
-	}	
+	}
+	
+	// inform client the message has been sent
+	bzero(server_buffer, sizeof(server_buffer));
+	sprintf(server_buffer, "Message sent to channel %s.", id);
+	send(client_fd, server_buffer, BUFFER_SIZE, 0);		
 
 }
 
 
 void bye(){
+	
+	subscriptions = 0;
+	
 	for (int i = 0; i<=255;i++){
 		channels[i].subscribed = false;
 		channels[i].unread_messages = 0;
 		channels[i].read_messages = 0;
 	}
+
+	// clear linked list
+	next_node_t* temp = head;
+	while (temp != NULL){
+		next_node_t* next = temp->next;
+		free(temp);
+		temp = next;	
+	}
+	head = NULL;
+	end = NULL;
+
 	printf("Client %d has disconnected.\n", client_fd);
 	close(client_fd);
 	close(parallel_fd);
@@ -676,14 +710,16 @@ void clear_old_messages(int id) {
 
 
 void clean_exit(int signum){
-	
-	/* TODO
 
-	deal  elegantly  with  any  threads  that  have  been  created  
-	as  well  as  any  open  sockets,  shared  memory  regions,  
-	dynamically allocated memory and/or open files
-	
-	*/
+	// clear linked list
+	next_node_t* temp = head;
+	while (temp != NULL){
+		next_node_t* next = temp->next;
+		free(temp);
+		temp = next;	
+	}
+	head = NULL;
+	end = NULL;
 
 	close(server_fd);
 	close(client_fd);

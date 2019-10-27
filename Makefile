@@ -1,6 +1,7 @@
 #compiler and flags
 CC = gcc
 CFLAGS = -Wall -pthread 
+
 #headers
 DEPS = 
 
